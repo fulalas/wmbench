@@ -1,7 +1,7 @@
 /*
- * One process owns one ordinary managed GL window.  multi_compare.sh starts
- * eight copies at overlapping positions, which makes a multi-window workload
- * without relying on GLX context switching between windows.
+ * One process owns one ordinary managed GL window. Start eight copies at
+ * overlapping positions for a multi-window workload that does not rely on
+ * GLX context switching between windows.
  */
 #include <stdio.h>
 #include <stdlib.h>
