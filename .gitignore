@@ -1,0 +1,11 @@
+# built by make
+tools/*
+checks/*
+!tools/*.c
+!checks/*.c
+
+# what a run leaves behind
+results/
+*.log
+*.ppm
+va-*.txt
