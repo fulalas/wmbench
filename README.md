@@ -11,8 +11,7 @@ be put side by side.
 
 Both entry points build what they need, work out which compositor is running,
 and save their table under `results/`. With no power sensor everything still
-runs and the power column reads `-`. `argbbench`, `multiscene` and `videobench`
-are extra workloads to run by hand.
+runs and the power column reads `-`.
 
 ## benchmark.sh
 

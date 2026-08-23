@@ -4,7 +4,7 @@
 # Run it in each desktop session you want to compare, and put the tables
 # side by side.
 set -u
-ALL="idle usage move resize dnd popups render fullscreen uncapped stress"
+ALL="idle usage move resize dnd popups video argb render fullscreen uncapped stress"
 
 usage_help () {
     cat <<EOF
@@ -18,6 +18,10 @@ tests:
   resize    two full cycles of resizing by every handle, corner and edge
   dnd       drag and drop: one pass of icons over, then all back at once
   popups    400 menus appearing and disappearing at 20 a second
+  video     1200 frames handed over through shared memory, the way a player
+            does, at 60 a second
+  argb      2400 redraws of a transparent window that declares an opaque
+            region, which is what every GTK window is, at 120 a second
   usage     a scripted person: maximize, minimize, snap to sides and
             corners, scroll, resize, drag and drop, raise, fullscreen
   render    1200 frames of a GL window held to 60 fps
@@ -44,7 +48,7 @@ case "${1:-}" in -h|--help) usage_help; exit 0;; esac
 
 TESTS=${*:-$ALL}
 for t in $TESTS; do
-    case "$t" in idle|usage|move|resize|dnd|popups|render|fullscreen|uncapped|stress) ;;
+    case "$t" in idle|usage|move|resize|dnd|popups|video|argb|render|fullscreen|uncapped|stress) ;;
         *) echo "unknown test: $t"; echo; usage_help; exit 1;;
     esac
 done
@@ -55,6 +59,8 @@ want () { case " $TESTS " in *" $1 "*) return 0;; *) return 1;; esac; }
 IDLE_WINDOW=${IDLE_WINDOW:-20}          # the baseline has no tasks to count
 MOVE_STEPS=${MOVE_STEPS:-2400}
 POP_CYCLES=${POP_CYCLES:-400}
+VIDEO_FRAMES=${VIDEO_FRAMES:-1200}
+ARGB_STEPS=${ARGB_STEPS:-2400}
 RENDER_FRAMES=${RENDER_FRAMES:-1200}
 RESIZE_CYCLES=${RESIZE_CYCLES:-2}
 DND_PASSES=${DND_PASSES:-1}
@@ -127,6 +133,8 @@ for t in $TESTS; do
         resize)   EST=$((EST + RESIZE_CYCLES * 18 + 10));;
         dnd)      EST=$((EST + DND_PASSES * 20 + 10));;
         popups)   EST=$((EST + POP_CYCLES / 20 + 10));;
+        video)    EST=$((EST + VIDEO_FRAMES / 60 + 10));;
+        argb)     EST=$((EST + ARGB_STEPS / 120 + 10));;
         render)   EST=$((EST + RENDER_FRAMES / 60 + 10));;
         fullscreen) EST=$((EST + 2 * (RENDER_FRAMES / 60 + 10)));;
         uncapped) EST=$((EST + UNCAP_SECONDS + 6));;
@@ -183,6 +191,7 @@ measure () {                    # $1 row name, $2 task count, $3... the load
 }
 
 IDLE=""; USAGE=""; MOVE=""; RESIZE=""; DND=""; POP=""; RENDER=""; UNCAP=""
+VIDEO=""; ARGB=""
 FPS=""; FS=""; FS_ASK=""; STRESS=""; LOADFAIL=""
 
 # The live line goes to the terminal itself, not through the file: the run can
@@ -252,6 +261,18 @@ if want popups; then
     POP=$(measure popups "$POP_CYCLES" ./tools/popbench 0 20 6) ||
         LOADFAIL="$LOADFAIL popups"
     tally "popups" "$POP"
+fi
+if want video; then
+    running "video"
+    VIDEO=$(measure video "$VIDEO_FRAMES" ./tools/videobench 0 60) ||
+        LOADFAIL="$LOADFAIL video"
+    tally "video" "$VIDEO"
+fi
+if want argb; then
+    running "transparent window"
+    ARGB=$(measure argb "$ARGB_STEPS" ./tools/argbbench 0 120) ||
+        LOADFAIL="$LOADFAIL argb"
+    tally "transparent window" "$ARGB"
 fi
 if want usage; then
     running "usage"

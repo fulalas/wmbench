@@ -20,9 +20,9 @@ GATE    = lib/gate.c lib/gate.h
 POLITE  = lib/polite.c lib/polite.h
 STAGE   = lib/stage.c lib/stage.h
 
-TOOLS  = tools/cmcheck tools/restack tools/fsbench2 tools/multiscene \
-         tools/movebench tools/transbench tools/manywin tools/popbench \
-         tools/argbbench tools/videobench tools/usagebench
+TOOLS  = tools/cmcheck tools/restack tools/fsbench2 tools/movebench \
+         tools/transbench tools/manywin tools/popbench tools/argbbench \
+         tools/videobench tools/usagebench
 CHECKS = checks/motion_check checks/stale_check checks/pop_check \
          checks/suspend_check checks/shape_check checks/resize_check \
          checks/offscreen_check checks/iconify_check
@@ -37,8 +37,6 @@ tools/cmcheck: tools/cmcheck.c
 	$(CC) $(CFLAGS) $(INC) -o $@ $< $(X11)
 tools/fsbench2: tools/fsbench2.c $(POLITE) $(GATE) $(STAGE)
 	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/polite.c lib/gate.c lib/stage.c $(GL)
-tools/multiscene: tools/multiscene.c
-	$(CC) $(CFLAGS) $(INC) -o $@ $< $(GL) $(LIBM)
 tools/movebench: tools/movebench.c $(GATE) $(STAGE)
 	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/gate.c lib/stage.c $(X11) $(LIBM)
 tools/transbench: tools/transbench.c $(POLITE) $(GATE) $(STAGE)
@@ -47,10 +45,10 @@ tools/manywin: tools/manywin.c $(STAGE)
 	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/stage.c $(X11)
 tools/popbench: tools/popbench.c $(GATE) $(STAGE)
 	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/gate.c lib/stage.c $(X11)
-tools/argbbench: tools/argbbench.c
-	$(CC) $(CFLAGS) $(INC) -o $@ $< $(X11)
-tools/videobench: tools/videobench.c
-	$(CC) $(CFLAGS) $(INC) -o $@ $< $(X11) -lXext
+tools/argbbench: tools/argbbench.c $(GATE)
+	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/gate.c $(X11)
+tools/videobench: tools/videobench.c $(GATE)
+	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/gate.c $(X11) -lXext
 tools/usagebench: tools/usagebench.c $(CAPTURE) $(POLITE) $(GATE) $(STAGE)
 	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/capture.c lib/polite.c lib/gate.c lib/stage.c $(X11)
 

@@ -11,6 +11,8 @@
  * renderer would lose.
  *
  *   videobench <seconds> [frames per second] [width] [height]
+ *
+ * BENCH_TASKS=N hands over N frames instead of running for the seconds given.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,6 +25,31 @@
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
 #include <X11/extensions/XShm.h>
+
+#include "gate.h"
+
+/*
+ * Fixed work: BENCH_TASKS=N does exactly N tasks, however long that takes, so
+ * every session performs the same amount of work and the numbers compare. The
+ * measured part is bracketed by the two marks, after an unmeasured warm-up.
+ */
+static long bench_tasks (void)
+{
+    const char *e = getenv ("BENCH_TASKS");
+
+    return (e != NULL && *e != '\0') ? atol (e) : 0;
+}
+
+static void mark (const char *s)
+{
+    if (strcmp (s, "MEASURE-START") == 0)
+    {
+        /* In a mix of programs, wait until the whole load is up. See gate.c */
+        bench_wait_go ();
+    }
+    printf ("%s\n", s);
+    fflush (stdout);
+}
 
 static double now (void)
 {
@@ -54,9 +81,10 @@ int main (int argc, char **argv)
 
     /* The frame loop writes four pixels at a time */
     w &= ~3;
-    int scr, i, x, y, frames = 0, major, minor;
+    int scr, i, x, y, frames = 0, major, minor, warm;
+    long tasks, done = 0;
     Bool pixmaps;
-    double start;
+    double start, mstart;
 
     d = XOpenDisplay (NULL);
     if (d == NULL)
@@ -131,8 +159,11 @@ int main (int argc, char **argv)
     }
     XSync (d, False);
 
+    tasks = bench_tasks ();
+    warm = (tasks > 0) ? 10 : 0;
     start = now ();
-    for (i = 0; now () - start < seconds; i++)
+    mstart = start;
+    for (i = 0; ; i++)
     {
         double due = start + i / rate;
 
@@ -155,14 +186,51 @@ int main (int argc, char **argv)
         XSync (d, False);
         frames++;
 
+        if (tasks > 0)
+        {
+            if (i + 1 == warm)
+            {
+                mark ("MEASURE-START");
+                mstart = now ();
+                /*
+                 * The gate in mark() can have held this a long time, and the
+                 * schedule counts from start: left alone it would run flat out
+                 * to catch up, which is not the fixed rate this load is for.
+                 */
+                start = mstart - (double) (i + 1) / rate;
+                frames = 0;
+            }
+            else if (i + 1 > warm)
+            {
+                done++;
+            }
+            if (done >= tasks)
+            {
+                break;
+            }
+        }
+        else if (now () - start >= seconds)
+        {
+            break;
+        }
+
         while (now () < due)
         {
             usleep (200);
         }
     }
 
-    printf ("AVERAGE %.1f frames/s over %.0f s\n", frames / (now () - start),
-            seconds);
+    if (tasks > 0)
+    {
+        mark ("MEASURE-END");
+        printf ("AVERAGE %.1f frames/s over %.1f s, %ld frames\n",
+                frames / (now () - mstart), now () - mstart, done);
+    }
+    else
+    {
+        printf ("AVERAGE %.1f frames/s over %.0f s\n",
+                frames / (now () - start), seconds);
+    }
 
     XShmDetach (d, &shm);
     XDestroyImage (img);

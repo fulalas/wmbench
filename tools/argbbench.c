@@ -9,17 +9,45 @@
  * texture. Only the margin actually needs that.
  *
  *   argbbench <seconds> [steps per second] [margin]
+ *
+ * BENCH_TASKS=N does N steps instead of running for the seconds given.
  */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <unistd.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
 
+#include "gate.h"
+
 #define WINW 1600
 #define WINH 1000
+
+/*
+ * Fixed work: BENCH_TASKS=N does exactly N tasks, however long that takes, so
+ * every session performs the same amount of work and the numbers compare. The
+ * measured part is bracketed by the two marks, after an unmeasured warm-up.
+ */
+static long bench_tasks (void)
+{
+    const char *e = getenv ("BENCH_TASKS");
+
+    return (e != NULL && *e != '\0') ? atol (e) : 0;
+}
+
+static void mark (const char *s)
+{
+    if (strcmp (s, "MEASURE-START") == 0)
+    {
+        /* In a mix of programs, wait until the whole load is up. See gate.c */
+        bench_wait_go ();
+    }
+    printf ("%s\n", s);
+    fflush (stdout);
+}
 
 static double now (void)
 {
@@ -47,8 +75,9 @@ int main (int argc, char **argv)
         rate = 120.0;
     }
     int margin = (argc > 3) ? atoi (argv[3]) : 40;
-    int scr, nvi, i, j, steps = 0;
-    double start;
+    int scr, nvi, i, j, steps = 0, warm;
+    long tasks, done = 0;
+    double start, mstart;
     long opaque[4];
     unsigned long colours[6] = {
         0xffc04040, 0xff40c040, 0xff4040c0, 0xffc0c040, 0xffc040c0, 0xff40c0c0
@@ -110,8 +139,11 @@ int main (int argc, char **argv)
     XSync (d, False);
     sleep (3);
 
+    tasks = bench_tasks ();
+    warm = (tasks > 0) ? 10 : 0;
     start = now ();
-    for (i = 0; now () - start < seconds; i++)
+    mstart = start;
+    for (i = 0; ; i++)
     {
         double due = start + i / rate;
 
@@ -127,14 +159,51 @@ int main (int argc, char **argv)
         XSync (d, False);
         steps++;
 
+        if (tasks > 0)
+        {
+            if (i + 1 == warm)
+            {
+                mark ("MEASURE-START");
+                mstart = now ();
+                /*
+                 * The gate in mark() can have held this a long time, and the
+                 * schedule counts from start: left alone it would run flat out
+                 * to catch up, which is not the fixed rate this load is for.
+                 */
+                start = mstart - (double) (i + 1) / rate;
+                steps = 0;
+            }
+            else if (i + 1 > warm)
+            {
+                done++;
+            }
+            if (done >= tasks)
+            {
+                break;
+            }
+        }
+        else if (now () - start >= seconds)
+        {
+            break;
+        }
+
         while (now () < due)
         {
             usleep (200);
         }
     }
 
-    printf ("AVERAGE %.1f steps/s over %.0f s\n", steps / (now () - start),
-            seconds);
+    if (tasks > 0)
+    {
+        mark ("MEASURE-END");
+        printf ("AVERAGE %.1f steps/s over %.1f s, %ld steps\n",
+                steps / (now () - mstart), now () - mstart, done);
+    }
+    else
+    {
+        printf ("AVERAGE %.1f steps/s over %.0f s\n",
+                steps / (now () - start), seconds);
+    }
 
     XDestroyWindow (d, win);
     XCloseDisplay (d);
