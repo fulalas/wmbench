@@ -74,7 +74,7 @@ int main (int argc, char **argv)
     int scr, steps = (argc > 1) ? atoi (argv[1]) : 120;
     int managed = (argc > 2 && !strcmp (argv[2], "managed"));
     int s, i, x, y, px, py, offset = 0;
-    int clean = 0, incoherent = 0, foreign = 0, edge_bad = 0;
+    int clean = 0, incoherent = 0, foreign = 0, edge_bad = 0, blind = 0;
 
     d = XOpenDisplay (NULL);
     if (d == NULL)
@@ -122,6 +122,7 @@ int main (int argc, char **argv)
         int start, j, fits = -1;
 
         XResizeWindow (d, win, w, h);
+        XRaiseWindow (d, win);
         if (managed)
         {
             /*
@@ -212,6 +213,8 @@ int main (int argc, char **argv)
             if (edge != NULL)
             {
                 int fx, fy, bad = 0;
+                int minx = edge->width, maxx = -1;
+                int miny = edge->height, maxy = -1;
 
                 for (fy = 2; fy < edge->height - 2; fy += 3)
                 {
@@ -220,6 +223,10 @@ int main (int argc, char **argv)
                         if (colour_index (XGetPixel (edge, fx, fy)) < 0)
                         {
                             bad++;
+                            if (fx < minx) { minx = fx; }
+                            if (fx > maxx) { maxx = fx; }
+                            if (fy < miny) { miny = fy; }
+                            if (fy > maxy) { maxy = fy; }
                         }
                     }
                 }
@@ -229,9 +236,28 @@ int main (int argc, char **argv)
                  */
                 if (bad > 200)
                 {
-                    edge_bad++;
-                    printf ("step %d: %d pixels inside the window are no "
-                            "colour of the pattern\n", s, bad);
+                    /*
+                     * Where they are says what they are. A band lies along one
+                     * edge, so it is narrow one way however long it is the
+                     * other. Wrong pixels spread across most of the window in
+                     * both directions are not a band at all: another window is
+                     * sitting on top of ours, and a photograph of someone
+                     * else's window says nothing about this one. Nothing here
+                     * owns our stacking, so it can happen at any time.
+                     */
+                    if (maxx - minx > (edge->width * 3) / 5 &&
+                        maxy - miny > (edge->height * 3) / 5)
+                    {
+                        blind++;
+                        printf ("step %d: something is covering the window, "
+                                "nothing proved\n", s);
+                    }
+                    else
+                    {
+                        edge_bad++;
+                        printf ("step %d: %d pixels inside the window are no "
+                                "colour of the pattern\n", s, bad);
+                    }
                 }
                 XDestroyImage (edge);
             }
@@ -257,7 +283,18 @@ int main (int argc, char **argv)
                     known++;
                 }
             }
-            if (known < total)
+            if (known == 0)
+            {
+                /*
+                 * Not one row of ours anywhere: we are photographing another
+                 * window, not a defect in this one. See the same reasoning at
+                 * the edge test below.
+                 */
+                blind++;
+                printf ("step %d: something is covering the window, "
+                        "nothing proved\n", s);
+            }
+            else if (known < total)
             {
                 /* Something that is not the pattern at all: black, or garbage */
                 foreign++;
@@ -278,8 +315,8 @@ int main (int argc, char **argv)
     XCloseDisplay (d);
 
     printf ("resizes: %d coherent, %d mixed, %d not the pattern, "
-            "%d with a band at an edge\n",
-            clean, incoherent, foreign, edge_bad);
+            "%d with a band at an edge, %d proved nothing\n",
+            clean, incoherent, foreign, edge_bad, blind);
 
     return (incoherent == 0 && foreign == 0 && edge_bad == 0 && clean > 0)
            ? 0 : 1;
