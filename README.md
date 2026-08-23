@@ -29,9 +29,8 @@ the geometry it asked for against what it got, photographs the window's own
 content, and films the pass where the session can be recorded, so a compositor
 that quietly ignores a move is caught.
 
-Restart the compositor first - the tests look at what is running, not what was
-just built. They also need an idle screen: anything else animating on it will
-flip them.
+The tests look at whatever compositor is running and never touch it. They do
+need an idle screen: anything else animating on it will flip them.
 
 On Wayland a screenshot tool is required (`grim`, `gnome-screenshot` or
 `spectacle`), otherwise the pixel tests are skipped.
