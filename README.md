@@ -67,7 +67,7 @@ Two sensors, added together when both are needed:
 | AMD integrated GPU | CPU and GPU combined |
 | AMD discrete GPU | GPU, plus the CPU from its own sensor |
 | Intel integrated GPU | CPU and GPU combined |
-| NVIDIA discrete GPU, NVIDIA driver | GPU, asked of `nvidia-smi`, plus the CPU |
+| NVIDIA discrete GPU, NVIDIA driver | GPU, read with `nvidia-smi`, plus the CPU |
 | NVIDIA discrete GPU, mesa driver | CPU only, GPU sensor doesn't work with mesa |
 
 Which sensors were used is printed above the table, so a figure that covers
@@ -79,8 +79,9 @@ it then stays open to everyone until you reboot. `Ctrl-C` at the prompt, or
 `WMBENCH_NO_SUDO=1`, carries on without the CPU. Nothing is asked on a chip
 that reports CPU and GPU as one figure, because there is nothing to add.
 
-`nvidia-smi` is asked once for a whole run, not once per sample: starting it
-ten times a second would land in the CPU figures being measured.
+`nvidia-smi` is started once and left running for the whole test, printing a
+reading every fifth of a second. Starting it fresh for each reading would put
+ten of its startups a second into the CPU figures being measured.
 
 Sensors are found by driver name, never by index: hwmon numbering is not stable
 across boots, and nvme drives and wireless cards expose `power1_average` too.
