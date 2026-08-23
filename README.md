@@ -60,17 +60,19 @@ by capturing mid-reframe, so read it alongside the plain mode.
 
 ## The power metric
 
-Two sensors, added together when both are needed:
+One sensor for the CPU, one for the GPU, added together when a machine needs
+both:
 
-| what you have | what the watts include |
-| --- | --- |
-| AMD integrated GPU | CPU and GPU combined |
-| AMD discrete GPU | GPU, plus the CPU from its own sensor |
-| Intel integrated GPU | CPU and GPU combined |
-| NVIDIA discrete GPU, NVIDIA driver | GPU, read with `nvidia-smi`, plus the CPU |
-| NVIDIA discrete GPU, mesa driver | CPU only, GPU sensor doesn't work with mesa |
+- CPU - `energy_uj` for both AMD and Intel
+- AMD GPU - `power1_average`
+- Intel GPU - `energy1_input`, on the discrete cards
+- NVIDIA GPU - `nvidia-smi`, present in NVIDIA driver only, so mesa drivers
+  won't read it
+
+When an integrated GPU is used, the power reading will combine CPU and GPU into
+a single value.
 
 The CPU sensor might be root-only on some machines. In this case, you are asked
 whether to open it with root, before anything is measured.
 
-Sensors use `power1_average` and are found by driver name, never by index.
+Sensors are found by driver name, never by index.

@@ -82,6 +82,27 @@ find_cpu_energy () {
     return 1
 }
 
+# Intel's discrete cards report energy rather than power, the same way the CPU
+# does, so watts come from how fast the counter rises.
+find_gpu_energy () {
+    local h name
+
+    for h in /sys/class/hwmon/hwmon*; do
+        [ -r "$h/energy1_input" ] || continue
+        [ -r "$h/name" ] || continue
+        read -r name < "$h/name"
+        case "$name" in
+            i915|xe)
+                echo "$h/energy1_input"
+
+                return 0
+                ;;
+        esac
+    done
+
+    return 1
+}
+
 # NVIDIA boards keep their power behind the proprietary driver's NVML, so the
 # only way to it is nvidia-smi. Streamed for a whole window rather than forked
 # per sample: a fork every tenth of a second would show up in the very
@@ -96,8 +117,8 @@ find_nvidia_power () {
 # Decide what the sensors found can answer. A function so that it can be
 # re-run, which is how the machines this one is not get tested.
 power_choose () {
-    POWER_HWMON=""; POWER_LABEL=""; POWER_ENERGY=""; POWER_NVIDIA=""
-    POWER_DESC=""; POWER_OK=0; POWER_CPU_WANTED=1
+    POWER_HWMON=""; POWER_LABEL=""; POWER_ENERGY=""; POWER_GPU_ENERGY=""
+    POWER_NVIDIA=""; POWER_DESC=""; POWER_OK=0; POWER_CPU_WANTED=1
     local gpu="" cpu=""
 
     read -r POWER_HWMON POWER_LABEL <<< "$(find_gpu_power)"
@@ -109,16 +130,19 @@ power_choose () {
         POWER_ENERGY=""
         POWER_CPU_WANTED=0
         POWER_OK=1
-        POWER_DESC="$POWER_HWMON (PPT: processor and graphics)"
+        POWER_DESC="$POWER_HWMON (PPT: CPU and GPU)"
 
         return 0
     fi
 
-    [ -n "$POWER_HWMON" ] && gpu="$POWER_HWMON (board)"
+    [ -n "$POWER_HWMON" ] && gpu="$POWER_HWMON (GPU)"
     if [ -z "$gpu" ]; then
-        POWER_NVIDIA=$(find_nvidia_power) && gpu="nvidia-smi (board)"
+        POWER_GPU_ENERGY=$(find_gpu_energy) && gpu="$POWER_GPU_ENERGY (GPU)"
     fi
-    [ -n "$POWER_ENERGY" ] && cpu="$POWER_ENERGY (processor)"
+    if [ -z "$gpu" ]; then
+        POWER_NVIDIA=$(find_nvidia_power) && gpu="nvidia-smi (GPU)"
+    fi
+    [ -n "$POWER_ENERGY" ] && cpu="$POWER_ENERGY (CPU)"
 
     # Report whatever can be read and say exactly what that covers. A figure
     # missing a part is still worth having between two runs on this machine,
@@ -129,10 +153,10 @@ power_choose () {
         POWER_DESC="$gpu + $cpu"
     elif [ -n "$cpu" ]; then
         POWER_OK=1
-        POWER_DESC="$cpu only, the graphics cannot be read"
+        POWER_DESC="$cpu only, the GPU cannot be read"
     elif [ -n "$gpu" ]; then
         POWER_OK=1
-        POWER_DESC="$gpu only, the processor cannot be read"
+        POWER_DESC="$gpu only, the CPU cannot be read"
     else
         echo "Power will not be reported, and nothing will be guessed at." >&2
         echo "  No graphics sensor: amdgpu and k10temp expose one in sysfs," >&2
@@ -203,11 +227,10 @@ power_unlock () {
 # sampling at all: its rise across the whole window, over the window's length,
 # is the average by definition - and it costs two reads instead of hundreds.
 power_begin () {
-    POWER_N=0; POWER_SUM=0; POWER_E0=""; POWER_T0=""; POWER_NV_PID=""
-    if [ -n "$POWER_ENERGY" ]; then
-        read -r POWER_E0 < "$POWER_ENERGY"
-        POWER_T0=$EPOCHREALTIME
-    fi
+    POWER_N=0; POWER_SUM=0; POWER_NV_PID=""
+    POWER_CPU_E0=""; POWER_GPU_E0=""; POWER_T0=$EPOCHREALTIME
+    [ -n "$POWER_ENERGY" ] && read -r POWER_CPU_E0 < "$POWER_ENERGY"
+    [ -n "$POWER_GPU_ENERGY" ] && read -r POWER_GPU_E0 < "$POWER_GPU_ENERGY"
     if [ -n "$POWER_NVIDIA" ]; then
         POWER_NV_FILE=$(mktemp)
         nvidia-smi --query-gpu=power.draw --format=csv,noheader,nounits \
@@ -223,29 +246,32 @@ power_sample () {
 }
 
 power_end () {
-    local e1="" t1="" nv=0
+    local cpu_e1="" gpu_e1="" t1="" nv=0
 
     if [ "$POWER_OK" != 1 ]; then
         echo "-"
 
         return 0
     fi
-    if [ -n "$POWER_ENERGY" ]; then
-        read -r e1 < "$POWER_ENERGY"
-        t1=$EPOCHREALTIME
-    fi
+    t1=$EPOCHREALTIME
+    [ -n "$POWER_ENERGY" ] && read -r cpu_e1 < "$POWER_ENERGY"
+    [ -n "$POWER_GPU_ENERGY" ] && read -r gpu_e1 < "$POWER_GPU_ENERGY"
     if [ -n "$POWER_NV_PID" ]; then
         kill "$POWER_NV_PID" 2>/dev/null; wait "$POWER_NV_PID" 2>/dev/null
         nv=$(awk 'NF && $1 + 0 == $1 { s += $1; n++ }
                   END { printf "%.3f", (n ? s / n : 0) }' "$POWER_NV_FILE")
         rm -f "$POWER_NV_FILE"
     fi
-    awk -v s="$POWER_SUM" -v n="$POWER_N" -v e0="$POWER_E0" -v e1="$e1" \
-        -v t0="$POWER_T0" -v t1="$t1" -v nv="$nv" 'BEGIN{
+    awk -v s="$POWER_SUM" -v n="$POWER_N" -v nv="$nv" \
+        -v c0="$POWER_CPU_E0" -v c1="$cpu_e1" \
+        -v g0="$POWER_GPU_E0" -v g1="$gpu_e1" \
+        -v t0="$POWER_T0" -v t1="$t1" 'BEGIN{
             w = (n ? s / n / 1e6 : 0) + nv;
-            # A counter that wrapped, which RAPL does, cannot be read as a rise
-            if (e1 != "" && e1 >= e0 && t1 > t0)
-                w += (e1 - e0) / (t1 - t0) / 1e6;
+            if (t1 > t0) {
+                # A counter that wrapped, which these do, is not a rise
+                if (c1 != "" && c1 >= c0) w += (c1 - c0) / (t1 - t0) / 1e6;
+                if (g1 != "" && g1 >= g0) w += (g1 - g0) / (t1 - t0) / 1e6;
+            }
             printf "%.2f", w }'
 }
 
