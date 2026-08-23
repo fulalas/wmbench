@@ -62,23 +62,22 @@ by capturing mid-reframe, so read it alongside the plain mode.
 
 Two sensors, added together when both are needed:
 
-| machine | what is read |
+| what you have | what the watts include |
 | --- | --- |
-| AMD integrated | the amdgpu hwmon, labelled PPT: processor and graphics in one |
-| AMD discrete | that hwmon for the board, plus RAPL for the processor |
-| Intel integrated | RAPL alone, which covers processor and graphics |
-| NVIDIA proprietary | `nvidia-smi` for the board, plus RAPL for the processor |
-| nouveau | the processor alone: the card exposes no power at all |
+| AMD integrated GPU | CPU and GPU together, in one number |
+| AMD discrete GPU | the GPU, plus the CPU from its own sensor |
+| Intel integrated GPU | CPU and GPU together, in one number |
+| NVIDIA discrete GPU, NVIDIA driver | the GPU, asked of `nvidia-smi`, plus the CPU |
+| NVIDIA discrete GPU, open driver | the CPU only - the GPU will not report its power |
 
-What is read is printed above the table, so a figure that covers less than the
-whole machine says so instead of passing for one. RAPL is root-only on most
-kernels, which is a `sudo chmod a+r` on the counter away:
+Which sensors were used is printed above the table, so a figure that covers
+less than the whole machine says so instead of passing for one. The CPU sensor
+is root-only on most kernels, one `chmod` away:
 
     sudo chmod a+r /sys/class/powercap/intel-rapl:0/energy_uj
 
-`nvidia-smi` is streamed for the length of a run, not called per sample: a
-fork every tenth of a second would land in the processor figures being
-measured. Frame rate needs no sensor at all.
+`nvidia-smi` is asked once for a whole run, not once per sample: starting it
+ten times a second would land in the CPU figures being measured.
 
 Sensors are found by driver name, never by index: hwmon numbering is not stable
 across boots, and nvme drives and wireless cards expose `power1_average` too.
