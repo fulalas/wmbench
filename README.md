@@ -29,9 +29,7 @@ the geometry it asked for against what it got, photographs the window's own
 content, and films the pass where the session can be recorded, so a compositor
 that quietly ignores a move is caught.
 
-The tests need an idle screen. A window that covers one of them hides what it
-was photographing: some tests notice and report that nothing was proved,
-others simply fail.
+The tests need an idle screen, otherwise they might fail.
 
 On Wayland a screenshot tool is required (`grim`, `gnome-screenshot` or
 `spectacle`), otherwise the pixel tests are skipped.
