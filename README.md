@@ -1,9 +1,8 @@
 # wmbench
 
-Benchmarks, artifact checks and measurement rigs for window managers. The
-checks and benchmarks work on any window manager, X11 or Wayland; only the
-rigs at the bottom are xfwm4-specific. They produced the numbers in the
-[xfwm4-gl](https://github.com/fulalas/xfwm4-gl) README.
+Benchmarks and artifact checks for window managers. Everything here works on
+any window manager, X11 or Wayland: the session is measured as it is, so two
+desktops can be put side by side.
 
     make              build everything
     ./validate.sh     run the checks and print a verdict
@@ -12,8 +11,7 @@ rigs at the bottom are xfwm4-specific. They produced the numbers in the
 | folder | holds |
 | --- | --- |
 | `tools/` | the workload programs the benchmarks drive |
-| `checks/` | the nine artifact checks |
-| `rigs/` | the xfwm4 A/B measurement rigs |
+| `checks/` | the eight artifact checks |
 | `lib/` | code shared by the above |
 
 ## Any window manager: the two entry points
@@ -86,14 +84,14 @@ compositor lives inside the shell process, so the CPU column includes the
 whole shell, and the table says that too.
 
     make            build the benchmarks and the checks
-    make check      run the nine artifact checks
+    make check      run the eight artifact checks
 
 `make check` tests the compositor that is *running*, not the one just built.
 Restart it first, or the checks will report on the previous binary.
 
 ## The artifact checks
 
-Any change to the presentation path has to pass all nine. Each has been shown
+Any change to the presentation path has to pass all eight. Each has been shown
 to fail on a deliberately broken build; a check that has never failed proves
 nothing.
 
@@ -103,41 +101,18 @@ nothing.
 | `stale_check` | staleness: leftovers after scrolling stops, and a window nobody draws to while another is hammered |
 | `pop_check` | what a menu covered not coming back when it closes |
 | `suspend_check` | the screen not coming back after compositing suspends for a fullscreen window |
-| `zoom_check` | the magnifier failing to magnify, or the screen not coming back when it is switched off |
 | `shape_check` | a non-rectangular window painting its undefined corners over what is behind it |
 | `resize_check` | a frame drawn from a window pixmap that was not ready yet, during continuous resizing |
 | `offscreen_check` | a window hanging off the left or top edge showing the wrong part of itself |
 | `iconify_check` | a window not coming back correctly after being minimised |
 
-`zoom_check` needs XTest, to hold Alt and turn the wheel; `shape_check` needs
-XShape. `resize_check` takes a `managed` argument to let the window manager frame
+`shape_check` needs XShape. `resize_check` takes a `managed` argument to let the window manager frame
 the window; that mode has a false-positive rate of about 1 in 800 from capturing
 while the manager is still reframing, and its teeth are unproven, so read it
 alongside the override-redirect mode rather than on its own. `stale_check` is the
 sensitive one. `motion_check` samples every fourth row and
 a stale patch can slip between its samples, so passing it alone means less than
 it looks.
-
-## The measurement rigs
-
-Each starts a window manager, alternates the variants under test, and prints a
-line per round. They live in `rigs/` and read `../src/xfwm4`, so point `WM` at
-the binary to test.
-
-| rig | workload |
-| --- | --- |
-| `rigs/rig.sh` | a window rendering: power, frame rate, idle-corrected compositor CPU |
-| `rigs/move_power.sh` | a window moving or resizing at a fixed rate (`MODE=resize`) |
-| `rigs/trans_power.sh` | a translucent window over a busy one |
-| `rigs/argb_power.sh` | a GTK-style ARGB window with a declared opaque region |
-| `rigs/many_ab.sh` | twenty idle windows and one animating |
-| `rigs/pop_ab.sh` | menus opening and closing |
-| `rigs/video_power.sh` | a player handing over frames through shared memory |
-| `rigs/multi_power.sh` | eight windows drawing flat out |
-| `rigs/suspend_power.sh` | what the fullscreen suspend option is worth |
-| `rigs/bin_ab.sh` | this build against another, for regressions |
-| `rigs/mem_ab.sh` | resident set and video memory per window |
-| `rigs/paint_rate_ab.sh` | composited screens a second, which needs no power sensor |
 
 ## Two rules, learned the hard way
 
@@ -176,19 +151,3 @@ figures have no such dependency.
 
 Whole-machine CPU time is retired: on this hardware the compositor costs under
 1% of one core and the idle background moves by more than that between runs.
-
-## Diagnostics in the compositor
-
-Environment variables the GL renderer reads, all off by default:
-
-| variable | effect |
-| --- | --- |
-| `XFWM4_GL_PRESENT` | `swap` (default), `copy`, `fbo`, `front` |
-| `XFWM4_GL_BACKEND=egl` | run the same renderer on EGL instead of GLX |
-| `XFWM4_GL_STATS` | paints a second and pixels presented |
-| `XFWM4_GL_PROFILE` | where a paint's time goes, on the painting thread, plus what it drew, the GPU's own time for it, and the buffer age distribution |
-| `XFWM4_PAINT_STATS` | screens a second, for either renderer, to check they composite the same number before comparing frame rates |
-| `XFWM4_GL_FENCE=off` | do not fence the frame; the compositor then paints at the full refresh rate, which costs more and gives the application less |
-| `XFWM4_GL_PIXMAP_WAIT=off` | skip the blocking read-back after binding a new window pixmap. Worth about 2% on menus; left on because the defect it guards cannot be shown to be gone |
-| `XFWM4_GL_NO_EXT=1` | pretend the driver has neither `GLX_EXT_buffer_age` nor `GLX_MESA_copy_sub_buffer`, so every frame repaints the whole screen. Prices the worst case a GL compositor can be handed |
-| `XFWM4_GL_NOPAINT` | do everything except draw. The screen becomes garbage; it measures what the frame would cost if the drawing were free |

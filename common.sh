@@ -1,4 +1,4 @@
-# Shared by every rig in this directory. Source it, do not run it.
+# Shared by the scripts in this directory. Source it, do not run it.
 #
 # Two rules are baked in here because getting either wrong has produced a
 # confident wrong answer in this project before.
@@ -11,9 +11,6 @@
 #   comparable between an idle desktop and a loaded one, or between a capped
 #   and an uncapped run: the clocks differ. Only put numbers side by side when
 #   the state they were taken in is the same.
-
-REPO=${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
-WM=${WM:-$REPO/src/xfwm4}
 
 # The whole-package power sensor, which is the metric this project uses.
 #
@@ -91,26 +88,6 @@ pwr_watch () {
     PW=$!
 }
 
-# Save the settings every rig touches and put them back when the script exits,
-# however it exits - Ctrl-C included. The rigs replace the session's window
-# manager per arm, and an interrupt kills the replacement too, so the restore
-# also starts a clean WM, detached so nothing takes it down with the script.
-# Normal completion goes through the same path: the last arm's WM was running
-# with test environment variables, which the clean start clears.
-save_xfwm_settings () {
-    XFWM_SAVED_GL=$(xfconf-query -c xfwm4 -p /general/use_gl_compositing 2>/dev/null || echo true)
-    XFWM_SAVED_COMP=$(xfconf-query -c xfwm4 -p /general/use_compositing 2>/dev/null || echo true)
-    XFWM_SAVED_SUSP=$(xfconf-query -c xfwm4 -p /general/suspend_compositing_fullscreen 2>/dev/null || echo true)
-    trap restore_xfwm_settings EXIT
-    trap 'exit 130' INT TERM
-}
-restore_xfwm_settings () {
-    xfconf-query -c xfwm4 -p /general/use_gl_compositing -s "$XFWM_SAVED_GL" 2>/dev/null
-    xfconf-query -c xfwm4 -p /general/use_compositing -s "$XFWM_SAVED_COMP" 2>/dev/null
-    xfconf-query -c xfwm4 -p /general/suspend_compositing_fullscreen -s "$XFWM_SAVED_SUSP" 2>/dev/null
-    ( setsid "$WM" --replace >/dev/null 2>&1 & ) 2>/dev/null
-}
-
 # The AMD card's sysfs device directory, found by driver name, never by index:
 # card numbering is not stable across boots or machines.
 amdgpu_device () {
@@ -127,12 +104,6 @@ amdgpu_device () {
 cpu_of () { awk '{print ($14 + $15) * 1000 / 100}' "/proc/$1/stat"; }
 
 all_cpu () { awk '/^cpu /{print ($2+$3+$4+$6+$7+$8) * 1000 / 100}' /proc/stat; }
-
-# Which renderer actually took the screen, rather than which was asked for
-backend () {
-    xprop -root _XFWM4_RENDER_BACKEND 2>/dev/null |
-        sed 's/.*= "//; s/ .*//; s/"//'
-}
 
 # The version of the running window manager, asked of the running binary
 # itself (/proc/pid/exe, so a locally built one answers for itself), or of

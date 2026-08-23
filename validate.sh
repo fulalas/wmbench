@@ -80,8 +80,7 @@ alive () {
     echo "  THE COMPOSITOR DIED"; FAILED=1; return 1
 }
 
-# The same checks for every WM. The magnifier check is not here: it drives
-# xfwm4's own alt-scroll zoom, which other WMs do not have.
+# The same checks for every WM
 CHECKS="motion stale pop suspend shape resize offscreen iconify"
 
 if [ "$PIXELS" = 1 ]; then

@@ -2,7 +2,7 @@
 # A separate, deliberately plain Makefile.
 #
 #   make            build everything
-#   make check      run the nine artifact checks against whatever compositor is
+#   make check      run the eight artifact checks against whatever compositor is
 #                   currently running
 
 CC      ?= cc
@@ -24,8 +24,8 @@ TOOLS  = tools/cmcheck tools/restack tools/fsbench2 tools/multiscene \
          tools/movebench tools/transbench tools/manywin tools/popbench \
          tools/argbbench tools/videobench tools/usagebench
 CHECKS = checks/motion_check checks/stale_check checks/pop_check \
-         checks/suspend_check checks/zoom_check checks/shape_check \
-         checks/resize_check checks/offscreen_check checks/iconify_check
+         checks/suspend_check checks/shape_check checks/resize_check \
+         checks/offscreen_check checks/iconify_check
 
 all: $(TOOLS) $(CHECKS)
 
@@ -59,10 +59,6 @@ tools/usagebench: tools/usagebench.c $(CAPTURE) $(POLITE) $(GATE) $(STAGE)
 checks/motion_check checks/stale_check checks/pop_check checks/suspend_check \
 checks/resize_check checks/offscreen_check checks/iconify_check: %: %.c $(CAPTURE) $(POLITE)
 	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/capture.c lib/polite.c $(X11)
-
-# The magnifier has to be driven through the pointer
-checks/zoom_check: checks/zoom_check.c $(CAPTURE) $(POLITE)
-	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/capture.c lib/polite.c $(X11) -lXtst
 
 checks/shape_check: checks/shape_check.c $(CAPTURE) $(POLITE)
 	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/capture.c lib/polite.c $(X11) -lXext
