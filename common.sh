@@ -84,20 +84,25 @@ find_cpu_energy () {
 
 # Intel's discrete cards report energy rather than power, the same way the CPU
 # does, so watts come from how fast the counter rises.
+#
+# Only a card with its own power is wanted here. Intel's integrated graphics
+# are inside the CPU package and so inside the CPU's own figure already, and
+# adding this counter to that would count the graphics twice. Integrated Intel
+# graphics always sit at 0000:00:02.0, on the root bus; a card sits behind a
+# bridge, which is the difference tested here.
 find_gpu_energy () {
-    local h name
+    local h name dev
 
     for h in /sys/class/hwmon/hwmon*; do
         [ -r "$h/energy1_input" ] || continue
         [ -r "$h/name" ] || continue
         read -r name < "$h/name"
-        case "$name" in
-            i915|xe)
-                echo "$h/energy1_input"
+        case "$name" in i915|xe) ;; *) continue;; esac
+        dev=$(basename "$(readlink -f "$h/device" 2>/dev/null)" 2>/dev/null)
+        case "$dev" in 0000:00:*) continue;; esac
+        echo "$h/energy1_input"
 
-                return 0
-                ;;
-        esac
+        return 0
     done
 
     return 1

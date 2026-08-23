@@ -60,8 +60,7 @@ by capturing mid-reframe, so read it alongside the plain mode.
 
 ## The power metric
 
-One sensor for the CPU, one for the GPU, added together when a machine needs
-both:
+The following sensors are supported:
 
 - CPU - `energy_uj` for both AMD and Intel
 - AMD GPU - `power1_average`
