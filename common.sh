@@ -26,8 +26,9 @@
 #
 # On an AMD APU the amdgpu hwmon's power1_average is labelled PPT and covers the
 # processor cores as well as the graphics, which is what makes it usable here.
-# On a discrete card the same file is board power and excludes the processor
-# entirely, so it cannot answer the question this project asks of it.
+# On a discrete card the same file is the board only and excludes the processor,
+# so a full figure there needs this sensor plus a processor one such as RAPL,
+# added up. Only the single-sensor case is handled here.
 find_power_sensor () {
     local h name label
 

@@ -58,28 +58,13 @@ slip between its samples. `resize_check` takes a `managed` argument to let the
 window manager frame the window; that mode false-positives about 1 time in 800
 by capturing mid-reframe, so read it alongside the plain mode.
 
-## Two rules, learned the hard way
-
-**Alternate the arms.** Whichever variant runs first in a round comes out
-cooler and wins, whatever it is. A comparison that does not alternate is
-worthless however tight its samples look: one experiment looked 9.4% faster on
-three consistent samples an arm and was worth nothing once alternated.
-
-**Compare within one condition.** A per-paint processor or GPU figure is not
-comparable between an idle desktop and a loaded one, or between a capped and
-an uncapped run: the clocks differ. The same code measured 0.417 ms a paint at
-a capped 60 fps and 0.379 uncapped.
-
 ## The power metric
 
-Package power, from the hwmon exposing `power1_average`, found by driver name.
-Never by index: the numbering is not stable across boots, and never by "whatever
-exposes that file", because nvme drives and wireless cards do too and a disk's
-power draw looks just as plausible in the output.
+Package power from the hwmon exposing `power1_average` found by driver name.
 
-On an AMD APU it covers the processor cores and the graphics together, which is
-what lets it see work the compositor causes outside its own process.
+On integrated graphics cards, it covers CPU and GPU together.
 
-**On a discrete card it does not work.** There the same file is board power and
-excludes the processor, so a compositor's processor-side cost is invisible in
-it. The frame-rate figures have no such dependency.
+**With a discrete card it takes two sensors.** There the same file is the
+board only, so the processor side has to come from its own sensor, such as
+RAPL. `common.sh` reads a single sensor today, so power is reported on an APU
+and left blank otherwise. The frame-rate figures have no such dependency.
