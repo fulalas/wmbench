@@ -64,7 +64,7 @@ Package power from the hwmon exposing `power1_average` found by driver name.
 
 On integrated graphics cards, it covers CPU and GPU together.
 
-**With a discrete card it takes two sensors.** There the same file is the
-board only, so the processor side has to come from its own sensor, such as
-RAPL. `common.sh` reads a single sensor today, so power is reported on an APU
-and left blank otherwise. The frame-rate figures have no such dependency.
+With a discrete card the same file is the board only, so the CPU side needs a
+second sensor such as RAPL. `common.sh` reads one sensor today, so power is
+reported on integrated graphics and left blank otherwise. Frame rate has no
+such dependency.
