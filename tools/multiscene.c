@@ -138,7 +138,7 @@ main (int argc, char **argv)
                             WINDOW_WIDTH, WINDOW_HEIGHT, 0,
                             visual->depth, InputOutput, visual->visual,
                             CWColormap | CWEventMask, &swa);
-    XStoreName (dpy, window, "xfwm4 multi-window GPU workload");
+    XStoreName (dpy, window, "multi-window GPU workload");
     XChangeProperty (dpy, window, window_type, XA_ATOM, 32,
                      PropModeReplace, (unsigned char *) &normal_type, 1);
     XMapWindow (dpy, window);

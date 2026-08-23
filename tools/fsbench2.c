@@ -177,8 +177,8 @@ int main (int argc, char **argv)
     /*
      * Both of these have to be set before the window is mapped. A window
      * manager decides whether to leave a window out of compositing when it
-     * maps it: stock xfwm4 stores a hint that arrives later but never acts on
-     * it, so a test that asked after mapping was never granted anything and
+     * maps it, and one was found to store a hint that arrives later without
+     * ever acting on it, so a test that asked after mapping was never granted anything and
      * looked exactly like a test that never asked.
      */
     if (getenv ("BENCH_BYPASS") != NULL)

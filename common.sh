@@ -173,7 +173,6 @@ display_info () {
                       if ($i ~ /\*/) { gsub (/[*+]/, "", $i);
                                        printf "%s @ %.0f Hz", $1, $i; exit }}')
         dpi=$(xrdb -query 2>/dev/null | awk '/Xft.dpi/{print $2; exit}')
-        [ -n "$dpi" ] || dpi=$(xfconf-query -c xsettings -p /Xft/DPI 2>/dev/null)
         if [ -n "$dpi" ] && [ "$dpi" -gt 0 ] 2>/dev/null; then
             scale=$(awk -v d="$dpi" 'BEGIN{printf "%g", d / 96}')
         fi

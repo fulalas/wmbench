@@ -14,6 +14,12 @@ desktops can be put side by side.
 | `checks/` | the eight artifact checks |
 | `lib/` | code shared by the above |
 
+`benchmark.sh` and `validate.sh` drive most of `tools/` themselves.
+`argbbench` (a translucent window with a declared opaque region),
+`multiscene` (eight windows drawing flat out) and `videobench` (a player
+handing over frames through shared memory) are extra workloads to run by
+hand.
+
 ## Any window manager: the two entry points
 
     ./validate.sh     build, detect the compositor, run the artifact checks

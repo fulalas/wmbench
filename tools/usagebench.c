@@ -576,7 +576,7 @@ static void drag_resize (int x0, int y0, int w0, int h0,
      * Did it take? A compositor can honour the pager request for the position
      * and ignore the size (labwc does), and then a resize test resizes
      * nothing. What it must not be is a test for "the size we asked for": a
-     * window manager is free to grant a smaller one, xfwm4 does on the leg
+     * window manager is free to grant a smaller one, and one does on the leg
      * that drags the top left corner, and reading that as a refusal flipped
      * the method on every leg - half of them then went through a different
      * path in the window manager, which is not what the numbers are for.
@@ -649,7 +649,7 @@ static void resize_phase (int bx, int by)
 /*
  * The same four carrier windows are used for every drag, mapped when one
  * starts and unmapped when it ends - which is worth testing in itself, and
- * is where xfwm4 and labwc part company. The catch is that a map or an unmap
+ * is where window managers part company. The catch is that a map or an unmap
  * is a request, not a fact: asking and then carrying on assumes the pair is
  * acted on in order, and under XWayland it is not, which left a carrier
  * invisible and made the icon look like it teleported. So each one is waited
@@ -1049,9 +1049,9 @@ static Window make_window (int x, int y, const char *name)
      * Cleared first. Only the flags below are set, but the rest of the struct
      * still travels to the window manager, and whatever the stack happened to
      * hold reads as a minimum size, a maximum size, a size step or an aspect
-     * ratio. xfwm4 was refusing this window's resizes because of it: asked for
-     * 1400 wide at x=970, it granted 1110 at x=1265, so a resize leg ran into
-     * a wall part way through.
+     * ratio. One window manager refused this window's resizes because of
+     * it: asked for 1400 wide at x=970, it granted 1110 at x=1265, so a
+     * resize leg ran into a wall part way through.
      */
     memset (&hints, 0, sizeof hints);
     hints.flags = USPosition | USSize | PPosition | PSize;
