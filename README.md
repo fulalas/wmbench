@@ -15,25 +15,26 @@ runs and the power column reads `-`.
 
 ## benchmark.sh
 
-Every test does a **fixed amount of work**, so two sessions compare directly
-and the time it took is a result rather than a setting.
+Every workload does a **fixed amount of work**, so two sessions compare
+directly and the time it took is a result rather than a setting.
 
-The exception is the frame-rate test, which is deliberately flat out and
-reports only frames a second. It runs three times: windowed, fullscreen, and
+The exception is the frame rate, which is deliberately flat out and reports
+only frames a second. It runs three times: windowed, fullscreen, and
 fullscreen asking compositing to step aside with `_NET_WM_BYPASS_COMPOSITOR`.
 
 ## validate.sh
-
-The tests need an idle screen, since anything else animating on it can cause
-a failure.
-
-On Wayland a screenshot tool is required (`grim`, `gnome-screenshot` or
-`spectacle`), otherwise the pixel tests are skipped.
 
 Eight tests, each hunting one visual defect. `validate.sh` runs them all, logs
 the geometry it asked for against what it got, photographs the window's own
 content, and films the pass where the session can be recorded, so a compositor
 that quietly ignores a move is caught.
+
+The tests need an idle screen. A window that covers one of them hides what it
+was photographing: some tests notice and report that nothing was proved,
+others simply fail.
+
+On Wayland a screenshot tool is required (`grim`, `gnome-screenshot` or
+`spectacle`), otherwise the pixel tests are skipped.
 
 | test | the defect it catches |
 | --- | --- |
