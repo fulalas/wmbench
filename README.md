@@ -60,11 +60,19 @@ by capturing mid-reframe, so read it alongside the plain mode.
 
 ## The power metric
 
-Package power from the hwmon exposing `power1_average` found by driver name.
+Two sensors, added together when both are needed:
 
-On integrated graphics cards, it covers CPU and GPU together.
+| machine | what is read |
+| --- | --- |
+| AMD integrated | the amdgpu hwmon, labelled PPT: processor and graphics in one |
+| AMD discrete | that hwmon for the board, plus RAPL for the processor |
+| Intel integrated | RAPL alone, which covers processor and graphics |
 
-With a discrete card the same file is the board only, so the CPU side needs a
-second sensor such as RAPL. `common.sh` reads one sensor today, so power is
-reported on integrated graphics and left blank otherwise. Frame rate has no
-such dependency.
+Anything else reports no power and says what was missing, rather than printing
+a figure that looks whole and is not: a board reading without a processor
+reading is short by the entire processor. RAPL's counter is root-only on most
+kernels, so the processor side of a discrete machine needs `sudo`. Frame rate
+has no such dependency.
+
+Sensors are found by driver name, never by index: hwmon numbering is not stable
+across boots, and nvme drives and wireless cards expose `power1_average` too.

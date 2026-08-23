@@ -109,7 +109,8 @@ else
     COMPOSITING=OFF
 fi
 echo "compositor: $WM_NAME $(wm_version) (compositing $COMPOSITING)"
-[ -n "$PWR" ] && echo "power:      $PWR" || echo "power:      no sensor, not reported"
+[ "$POWER_OK" = 1 ] && echo "power:      $POWER_DESC" \
+                     || echo "power:      no sensor, not reported"
 [ "$COMPOSITING" = OFF ] &&
     echo "            these numbers are the no-compositing floor"
 echo
@@ -137,20 +138,13 @@ now_s () { date +%s.%N; }
 # The idle baseline: no tasks to count, so a fixed window everywhere.
 # Prints "watts cpu_seconds duration".
 idle_window () {
-    local c0 c1 n=0 sum=0 w end=$((SECONDS + $1))
+    local c0 c1 w end=$((SECONDS + $1))
 
-    c0=$(wm_cpu)
+    c0=$(wm_cpu); power_begin
     while [ $SECONDS -lt $end ]; do
-        [ -n "$PWR" ] && { sum=$((sum + $(cat "$PWR" 2>/dev/null || echo 0)))
-                           n=$((n + 1)); }
-        sleep 0.1
+        power_sample; sleep 0.1
     done
-    c1=$(wm_cpu)
-    if [ -n "$PWR" ]; then
-        w=$(awk -v s=$sum -v n=$n 'BEGIN{printf "%.2f", (n ? s/n/1e6 : 0)}')
-    else
-        w="-"
-    fi
+    c1=$(wm_cpu); w=$(power_end)
     awk -v a=$c0 -v b=$c1 -v w="$w" -v t="$1" \
         'BEGIN{printf "%s %.2f %.1f", w, (b-a)/1000, t}'
 }
@@ -160,7 +154,7 @@ idle_window () {
 # measurement. Prints "watts cpu_seconds duration", or fails if the load did
 # not run. Nothing is ever cut short on time.
 measure () {                    # $1 row name, $2 task count, $3... the load
-    local name=$1 tasks=$2 log pid t0 t1 c0 c1 n=0 sum=0 w
+    local name=$1 tasks=$2 log pid t0 t1 c0 c1 w
     shift 2
     log="bm-$name.log"
     : > "$log"
@@ -171,22 +165,16 @@ measure () {                    # $1 row name, $2 task count, $3... the load
         kill -0 "$pid" 2>/dev/null || { wait "$pid"; return 1; }
         sleep 0.1
     done
-    t0=$(now_s); c0=$(wm_cpu)
+    t0=$(now_s); c0=$(wm_cpu); power_begin
     while ! grep -q MEASURE-END "$log" 2>/dev/null; do
         kill -0 "$pid" 2>/dev/null || break
-        [ -n "$PWR" ] && { sum=$((sum + $(cat "$PWR" 2>/dev/null || echo 0)))
-                           n=$((n + 1)); }
+        power_sample
         sleep 0.1
     done
-    t1=$(now_s); c1=$(wm_cpu)
+    t1=$(now_s); c1=$(wm_cpu); w=$(power_end)
     wait "$pid" || return 1
     grep -q MEASURE-END "$log" || return 1
 
-    if [ -n "$PWR" ]; then
-        w=$(awk -v s=$sum -v n=$n 'BEGIN{printf "%.2f", (n ? s/n/1e6 : 0)}')
-    else
-        w="-"
-    fi
     awk -v a=$c0 -v b=$c1 -v w="$w" -v t0="$t0" -v t1="$t1" \
         'BEGIN{printf "%s %.2f %.1f", w, (b-a)/1000, t1-t0}'
 }
@@ -353,11 +341,10 @@ if want stress; then
     for l in "${SL[@]}"; do
         while ! grep -q MEASURE-START "$l" 2>/dev/null; do sleep 0.1; done
     done
-    T0=$(now_s); C0=$(wm_cpu); N=0; SUM=0
+    T0=$(now_s); C0=$(wm_cpu); power_begin
     OK=1; LEFT=${#SL[@]}
     while [ "$LEFT" -gt 0 ]; do
-        [ -n "$PWR" ] && { SUM=$((SUM + $(cat "$PWR" 2>/dev/null || echo 0)))
-                           N=$((N + 1)); }
+        power_sample
         sleep 0.1
         LEFT=0
         for i in "${!SL[@]}"; do
@@ -385,11 +372,7 @@ if want stress; then
         if (t1 - lo > 0.2 * (t1 - t0))
             printf "%.0f", 100 * (t1 - lo) / (t1 - t0)}')
     if [ "$OK" = 1 ]; then
-        if [ -n "$PWR" ]; then
-            W=$(awk -v s=$SUM -v n=$N 'BEGIN{printf "%.2f", (n ? s/n/1e6 : 0)}')
-        else
-            W="-"
-        fi
+        W=$(power_end)
         STRESS=$(awk -v a=$C0 -v b=$C1 -v w="$W" -v t0="$T0" -v t1="$T1" \
                  'BEGIN{printf "%s %.2f %.1f", w, (b-a)/1000, t1-t0}')
     else
@@ -448,7 +431,7 @@ fi
 
 # Only where there is a battery to spend
 BAT=$(cat /sys/class/power_supply/BAT*/energy_full 2>/dev/null | head -1)
-if [ -n "$PWR" ] && [ -n "$BAT" ] && [ -n "$IDLE" ] && [ -n "$USAGE" ]; then
+if [ "$POWER_OK" = 1 ] && [ -n "$BAT" ] && [ -n "$IDLE" ] && [ -n "$USAGE" ]; then
     read -r iw ic it <<< "$IDLE"
     read -r uw uc ut <<< "$USAGE"
     awk -v i="$iw" -v u="$uw" -v uwh="$BAT" 'BEGIN{

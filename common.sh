@@ -12,24 +12,32 @@
 #   and an uncapped run: the clocks differ. Only put numbers side by side when
 #   the state they were taken in is the same.
 
-# The whole-package power sensor, which is the metric this project uses.
+# The power sensors, and what they can honestly answer.
 #
-# Never hardcode an hwmon index: the numbering is not stable across boots, and
-# reading the wrong one gives a plausible number for the wrong thing, or a
-# silent zero. Find it by name.
+# Two kinds of source, read differently:
+#   a hwmon power1_average   microwatts, taken as it reads
+#   a RAPL energy_uj         a rising counter, so power is what it gained
+#                            divided by how long that took
 #
-# And never fall back to "whatever exposes power1_average". On this machine only
-# the amdgpu hwmon does, but nvme and wifi devices expose that file on other
-# machines, and picking one would report a disk's power draw as the package's:
-# a confident number for entirely the wrong thing, with nothing in the output to
-# say so. Only sensors known to cover the package are accepted.
+# Never hardcode an hwmon index: the numbering is not stable across boots. And
+# never fall back to "whatever exposes power1_average", because nvme drives and
+# wireless cards expose that file too, and a disk's power draw looks just as
+# plausible in the output.
 #
-# On an AMD APU the amdgpu hwmon's power1_average is labelled PPT and covers the
-# processor cores as well as the graphics, which is what makes it usable here.
-# On a discrete card the same file is the board only and excludes the processor,
-# so a full figure there needs this sensor plus a processor one such as RAPL,
-# added up. Only the single-sensor case is handled here.
-find_power_sensor () {
+# What a machine can give:
+#   AMD integrated    the amdgpu hwmon labelled PPT already covers the
+#                     processor cores and the graphics together
+#   AMD discrete      that same file is the board alone, so the processor is
+#                     added from RAPL
+#   Intel integrated  no GPU hwmon, and the RAPL package covers the processor
+#                     and the graphics together
+#
+# Anything else is refused rather than reported. A board figure with no
+# processor figure would read like a whole-machine one and be wrong by the
+# entire processor, and there is nothing in a bare number to say so.
+
+# The graphics sensor, if a driver we trust exposes one. Echoes "path label".
+find_gpu_power () {
     local h name label
 
     for h in /sys/class/hwmon/hwmon*; do
@@ -38,15 +46,9 @@ find_power_sensor () {
         read -r name < "$h/name"
         case "$name" in
             amdgpu|k10temp)
-                label=""
+                label=none
                 [ -r "$h/power1_label" ] && read -r label < "$h/power1_label"
-                # PPT is the package figure. Anything else from these drivers is
-                # not necessarily, so say what was taken.
-                if [ "$label" != "PPT" ]; then
-                    echo "Using $h ($name, power1_label=${label:-none})." >&2
-                    echo "That is only the package figure if this is an APU." >&2
-                fi
-                echo "$h/power1_average"
+                echo "$h/power1_average $label"
 
                 return 0
                 ;;
@@ -56,13 +58,118 @@ find_power_sensor () {
     return 1
 }
 
-# No sensor is not fatal: everything else still runs, the power figures are
-# simply not reported. Nothing is ever guessed at.
-PWR=$(find_power_sensor) || {
-    echo "No package power sensor found, and none will be guessed at;" >&2
-    echo "power will not be reported. On an AMD APU the sensor is the" >&2
-    echo "amdgpu hwmon's power1_average, labelled PPT." >&2
-    PWR=""
+# The processor's energy counter. Most kernels keep it readable by root only,
+# so being unable to read it is the common case and worth saying out loud.
+POWER_ENERGY_LOCKED=""
+find_cpu_energy () {
+    local d name
+
+    for d in /sys/class/powercap/*/; do
+        [ -r "$d/name" ] || continue
+        read -r name < "$d/name"
+        case "$name" in
+            package-*)
+                if [ -r "${d}energy_uj" ]; then
+                    echo "${d}energy_uj"
+
+                    return 0
+                fi
+                POWER_ENERGY_LOCKED="${d}energy_uj"
+                ;;
+        esac
+    done
+
+    return 1
+}
+
+# A card whose power we cannot read at all makes every total incomplete
+discrete_gpu () {
+    local c drv
+
+    for c in /sys/class/drm/card*/device/driver; do
+        drv=$(basename "$(readlink -f "$c" 2>/dev/null)" 2>/dev/null)
+        case "$drv" in nvidia|nouveau) return 0;; esac
+    done
+
+    return 1
+}
+
+# Decide what the sensors found can answer. A function so that it can be
+# re-run, which is how the machines this one is not get tested.
+power_choose () {
+    POWER_HWMON=""; POWER_LABEL=""; POWER_ENERGY=""; POWER_DESC=""; POWER_OK=0
+    read -r POWER_HWMON POWER_LABEL <<< "$(find_gpu_power)"
+    POWER_ENERGY=$(find_cpu_energy)
+
+    if [ "$POWER_LABEL" = PPT ]; then
+        # Covers both already, so adding the processor counter would count it twice
+        POWER_ENERGY=""
+        POWER_OK=1
+        POWER_DESC="$POWER_HWMON (PPT: processor and graphics)"
+    elif [ -n "$POWER_HWMON" ] && [ -n "$POWER_ENERGY" ]; then
+        POWER_OK=1
+        POWER_DESC="$POWER_HWMON (board) + $POWER_ENERGY (processor)"
+    elif [ -z "$POWER_HWMON" ] && [ -n "$POWER_ENERGY" ] && ! discrete_gpu; then
+        POWER_OK=1
+        POWER_DESC="$POWER_ENERGY (package: processor and graphics)"
+    else
+        echo "Power will not be reported, and nothing will be guessed at." >&2
+        [ -n "$POWER_HWMON" ] &&
+            echo "  $POWER_HWMON reads the graphics board alone (label ${POWER_LABEL})." >&2
+        [ -z "$POWER_HWMON" ] &&
+            echo "  No graphics power sensor: only amdgpu and k10temp are trusted." >&2
+        if [ -n "$POWER_ENERGY_LOCKED" ]; then
+            echo "  $POWER_ENERGY_LOCKED needs root, so the processor side is missing." >&2
+        elif [ -z "$POWER_ENERGY" ]; then
+            echo "  No RAPL package counter for the processor side either." >&2
+        elif discrete_gpu; then
+            echo "  A card is present whose power cannot be read, so the RAPL" >&2
+            echo "  package figure would leave the graphics out." >&2
+        fi
+    fi
+}
+
+power_choose
+
+# One measurement window: power_begin, power_sample as often as you like, then
+# power_end, which echoes the average watts over the window, or "-".
+#
+# The hwmon side is averaged over the samples. The counter side needs no
+# sampling at all: its rise across the whole window, over the window's length,
+# is the average by definition - and it costs two reads instead of hundreds.
+power_begin () {
+    POWER_N=0; POWER_SUM=0; POWER_E0=""; POWER_T0=""
+    if [ -n "$POWER_ENERGY" ]; then
+        read -r POWER_E0 < "$POWER_ENERGY"
+        POWER_T0=$EPOCHREALTIME
+    fi
+}
+
+power_sample () {
+    [ -n "$POWER_HWMON" ] || return 0
+    POWER_SUM=$((POWER_SUM + $(cat "$POWER_HWMON" 2>/dev/null || echo 0)))
+    POWER_N=$((POWER_N + 1))
+}
+
+power_end () {
+    local e1="" t1=""
+
+    if [ "$POWER_OK" != 1 ]; then
+        echo "-"
+
+        return 0
+    fi
+    if [ -n "$POWER_ENERGY" ]; then
+        read -r e1 < "$POWER_ENERGY"
+        t1=$EPOCHREALTIME
+    fi
+    awk -v s="$POWER_SUM" -v n="$POWER_N" -v e0="$POWER_E0" -v e1="$e1" \
+        -v t0="$POWER_T0" -v t1="$t1" 'BEGIN{
+            w = (n ? s / n / 1e6 : 0);
+            # A counter that wrapped, which RAPL does, cannot be read as a rise
+            if (e1 != "" && e1 >= e0 && t1 > t0)
+                w += (e1 - e0) / (t1 - t0) / 1e6;
+            printf "%.2f", w }'
 }
 
 # Average package power over $1 seconds into file $2, in the background, after
@@ -81,11 +188,12 @@ PWR=$(find_power_sensor) || {
 # window manager these scripts start, which never exits.
 pwr_watch () {
     ( if [ "${3:-0}" -gt 0 ]; then sleep "$3"; fi
-      n=0; w=0; end=$((SECONDS + $1))
+      power_begin
+      end=$((SECONDS + $1))
       while [ $SECONDS -lt $end ]; do
-          w=$((w + $(cat "$PWR" 2>/dev/null || echo 0))); n=$((n + 1)); sleep 0.1
+          power_sample; sleep 0.1
       done
-      awk -v w=$w -v n=$n 'BEGIN{printf "%.2f", (n ? w/n/1e6 : 0)}' > "$2" ) &
+      power_end > "$2" ) &
     PW=$!
 }
 
