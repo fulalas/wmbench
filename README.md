@@ -9,12 +9,6 @@ be put side by side.
     ./validate.sh           look for visual defects, print a verdict
     ./compare_results.sh    put the saved runs side by side
 
-| folder | holds |
-| --- | --- |
-| `tools/` | the workload programs |
-| `checks/` | the eight artifact checks |
-| `lib/` | code shared by both |
-
 Both entry points build what they need, work out which compositor is running,
 and save their table under `results/`. With no power sensor everything still
 runs and the power column reads `-`. `argbbench`, `multiscene` and `videobench`
@@ -22,24 +16,12 @@ are extra workloads to run by hand.
 
 ## benchmark.sh
 
-Every test does a **fixed amount of work** - so many moves, so many menus, so
-many frames - however long that takes, so two sessions compare directly and
-the time it took is a result rather than a setting.
+Every test does a **fixed amount of work**, so two sessions compare directly
+and the time it took is a result rather than a setting.
 
 The exception is the frame-rate test, which is deliberately flat out and
 reports only frames a second. It runs three times: windowed, fullscreen, and
 fullscreen asking compositing to step aside with `_NET_WM_BYPASS_COMPOSITOR`.
-The two fullscreen figures compare with each other, not with the windowed one.
-
-The longest test is `usagebench`, a scripted person: windows maximized and
-restored, minimized and restored, snapped to the sides and the four corners,
-raised over each other like alt-tab, sent fullscreen, resized by every handle,
-icons dragged between windows, and scrolling by both the buttons and the
-scrollbar thumb. Plain X11 and EWMH with no input injection, so every session
-does the same work.
-
-On GNOME and Cinnamon the compositor lives inside the shell process, so the
-CPU column covers the whole shell. The table says so.
 
 ## validate.sh and the checks
 
