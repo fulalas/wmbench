@@ -2,8 +2,9 @@
 # A separate, deliberately plain Makefile.
 #
 #   make            build everything
-#   make check      run the eight artifact checks against whatever compositor is
-#                   currently running
+#
+# ./validate.sh runs the tests in checks/ and ./benchmark.sh the loads in
+# tools/; both build what they need first, so this is only for building alone.
 
 CC      ?= cc
 CFLAGS  ?= -O2 -Wall
@@ -61,16 +62,7 @@ checks/resize_check checks/offscreen_check checks/iconify_check: %: %.c $(CAPTUR
 checks/shape_check: checks/shape_check.c $(CAPTURE) $(POLITE)
 	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/capture.c lib/polite.c $(X11) -lXext
 
-check: $(CHECKS)
-	@fail=0; \
-	for c in $(CHECKS); do \
-	    printf '%-16s ' "$$(basename $$c)"; \
-	    out=$$(./$$c 2) || fail=1; \
-	    echo "$$out" | tail -1; \
-	done; \
-	exit $$fail
-
 clean:
 	rm -f $(TOOLS) $(CHECKS)
 
-.PHONY: all check clean
+.PHONY: all clean

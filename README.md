@@ -1,6 +1,6 @@
 # wmbench
 
-Benchmarks and artifact checks for window managers. Works on any window
+Benchmarks and visual defect tests for window managers. Works on any window
 manager, X11 or Wayland: it measures the session as it is, so two desktops can
 be put side by side.
 
@@ -22,21 +22,21 @@ The exception is the frame-rate test, which is deliberately flat out and
 reports only frames a second. It runs three times: windowed, fullscreen, and
 fullscreen asking compositing to step aside with `_NET_WM_BYPASS_COMPOSITOR`.
 
-## validate.sh and the checks
+## validate.sh
 
-`validate.sh` runs the checks, logs the geometry it asked for against what it
-got, photographs the window's own content, and films the pass where the session
-can be recorded, so a compositor that quietly ignores a move is caught.
+Eight tests, each hunting one visual defect. `validate.sh` runs them all, logs
+the geometry it asked for against what it got, photographs the window's own
+content, and films the pass where the session can be recorded, so a compositor
+that quietly ignores a move is caught.
 
-    make check      run the eight checks against the running compositor
-
-Restart the compositor first - the checks test what is running, not what was
+Restart the compositor first - the tests look at what is running, not what was
 just built. They also need an idle screen: anything else animating on it will
-flip them. On Wayland they need a screenshot tool (`grim`, `gnome-screenshot`
-or `spectacle`), since only the compositor can hand the screen out; without
-one the pixel checks are skipped and say so.
+flip them.
 
-| check | what it catches |
+On Wayland a screenshot tool is required (`grim`, `gnome-screenshot` or
+`spectacle`), otherwise the pixel tests are skipped.
+
+| test | the defect it catches |
 | --- | --- |
 | `motion_check` | tearing: a capture taken while a pattern scrolls that is not one single frame |
 | `stale_check` | staleness: leftovers after scrolling stops, and a window nobody draws to while another is hammered |
@@ -47,7 +47,7 @@ one the pixel checks are skipped and say so.
 | `offscreen_check` | a window hanging off the left or top edge showing the wrong part of itself |
 | `iconify_check` | a window not coming back correctly after being minimised |
 
-Each has been shown to fail on a deliberately broken build; a check that has
+Each has been shown to fail on a deliberately broken build; a test that has
 never failed proves nothing. `shape_check` needs XShape. `stale_check` is the
 sensitive one. `motion_check` samples every fourth row, so a stale patch can
 slip between its samples. `resize_check` takes a `managed` argument to let the
