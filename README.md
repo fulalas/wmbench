@@ -67,6 +67,7 @@ Two sensors, added together when both are needed:
 | AMD integrated | the amdgpu hwmon, labelled PPT: processor and graphics in one |
 | AMD discrete | that hwmon for the board, plus RAPL for the processor |
 | Intel integrated | RAPL alone, which covers processor and graphics |
+| NVIDIA | nothing: the card exposes no power in sysfs, so no figure is given |
 
 Anything else reports no power and says what was missing, rather than printing
 a figure that looks whole and is not: a board reading without a processor
