@@ -97,16 +97,17 @@ find_nvidia_power () {
 # re-run, which is how the machines this one is not get tested.
 power_choose () {
     POWER_HWMON=""; POWER_LABEL=""; POWER_ENERGY=""; POWER_NVIDIA=""
-    POWER_DESC=""; POWER_OK=0
+    POWER_DESC=""; POWER_OK=0; POWER_CPU_WANTED=1
     local gpu="" cpu=""
 
     read -r POWER_HWMON POWER_LABEL <<< "$(find_gpu_power)"
     POWER_ENERGY=$(find_cpu_energy)
 
     if [ "$POWER_LABEL" = PPT ]; then
-        # Already covers both, so reading the processor as well, which is
-        # possible whenever RAPL happens to be unlocked, would count it twice
+        # Already covers both, so reading the CPU as well, which is possible
+        # whenever RAPL happens to be unlocked, would count it twice
         POWER_ENERGY=""
+        POWER_CPU_WANTED=0
         POWER_OK=1
         POWER_DESC="$POWER_HWMON (PPT: processor and graphics)"
 
@@ -146,6 +147,52 @@ power_choose () {
 }
 
 power_choose
+
+# The CPU counter is root-only on most kernels, which is what stops a machine
+# with a separate card from being measured at all. Offer to open it rather than
+# leaving the run half measured, and only when it would add something: on a
+# chip that reports CPU and GPU as one figure there is nothing to gain.
+#
+# It stays readable until the next reboot, and readable by everyone, which is
+# why the kernel ships it closed.
+power_unlock () {
+    [ -n "$POWER_ENERGY" ] && return 0
+    [ "$POWER_CPU_WANTED" = 1 ] || return 0
+    [ -n "$POWER_ENERGY_LOCKED" ] || return 0
+    [ -z "${WMBENCH_NO_SUDO:-}" ] || return 0
+
+    if ! command -v sudo >/dev/null 2>&1; then
+        echo "The CPU power sensor is root-only. Open it with:" >&2
+        echo "  chmod a+r $POWER_ENERGY_LOCKED" >&2
+
+        return 0
+    fi
+
+    # A cached or passwordless sudo needs no interruption at all
+    if sudo -n chmod a+r "$POWER_ENERGY_LOCKED" 2>/dev/null; then
+        power_choose
+
+        return 0
+    fi
+
+    if [ ! -t 0 ]; then
+        echo "The CPU power sensor is root-only, and there is no terminal to" >&2
+        echo "ask on, so power will not include the CPU. Open it with:" >&2
+        echo "  sudo chmod a+r $POWER_ENERGY_LOCKED" >&2
+
+        return 0
+    fi
+
+    echo "The CPU power sensor is root-only, so the CPU is missing from the"
+    echo "power figures. Opening it needs your password, and it stays open to"
+    echo "everyone until you reboot."
+    echo "Leave it closed with Ctrl-C, or with WMBENCH_NO_SUDO=1 next time."
+    if sudo chmod a+r "$POWER_ENERGY_LOCKED"; then
+        power_choose
+    else
+        echo "Left closed; the CPU will not be in the power figures." >&2
+    fi
+}
 
 # One measurement window: power_begin, power_sample as often as you like, then
 # power_end, which echoes the average watts over the window, or "-".

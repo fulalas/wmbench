@@ -67,6 +67,9 @@ cd "$(dirname "$0")" || exit 1
 
 make -s all 2>/dev/null || make all || exit 1
 
+# Ask for the CPU sensor before measuring, not half way through
+power_unlock
+
 detect_wm || { echo "cannot tell what window manager this is"; exit 1; }
 ST=$(session_type)
 

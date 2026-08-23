@@ -64,17 +64,20 @@ Two sensors, added together when both are needed:
 
 | what you have | what the watts include |
 | --- | --- |
-| AMD integrated GPU | CPU and GPU together, in one number |
-| AMD discrete GPU | the GPU, plus the CPU from its own sensor |
-| Intel integrated GPU | CPU and GPU together, in one number |
-| NVIDIA discrete GPU, NVIDIA driver | the GPU, asked of `nvidia-smi`, plus the CPU |
-| NVIDIA discrete GPU, open driver | the CPU only - the GPU will not report its power |
+| AMD integrated GPU | CPU and GPU combined |
+| AMD discrete GPU | GPU, plus the CPU from its own sensor |
+| Intel integrated GPU | CPU and GPU combined |
+| NVIDIA discrete GPU, NVIDIA driver | GPU, asked of `nvidia-smi`, plus the CPU |
+| NVIDIA discrete GPU, mesa driver | CPU only, GPU sensor doesn't work with mesa |
 
 Which sensors were used is printed above the table, so a figure that covers
-less than the whole machine says so instead of passing for one. The CPU sensor
-is root-only on most kernels, one `chmod` away:
+less than the whole machine says so instead of passing for one.
 
-    sudo chmod a+r /sys/class/powercap/intel-rapl:0/energy_uj
+The CPU sensor is root-only on most kernels. When it is closed and the run
+needs it, you are asked for your password once, before anything is measured;
+it then stays open to everyone until you reboot. `Ctrl-C` at the prompt, or
+`WMBENCH_NO_SUDO=1`, carries on without the CPU. Nothing is asked on a chip
+that reports CPU and GPU as one figure, because there is nothing to add.
 
 `nvidia-smi` is asked once for a whole run, not once per sample: starting it
 ten times a second would land in the CPU figures being measured.
