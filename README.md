@@ -24,16 +24,16 @@ fullscreen asking compositing to step aside with `_NET_WM_BYPASS_COMPOSITOR`.
 
 ## validate.sh
 
+The tests need an idle screen, since anything else animating on it can cause
+a failure.
+
+On Wayland a screenshot tool is required (`grim`, `gnome-screenshot` or
+`spectacle`), otherwise the pixel tests are skipped.
+
 Eight tests, each hunting one visual defect. `validate.sh` runs them all, logs
 the geometry it asked for against what it got, photographs the window's own
 content, and films the pass where the session can be recorded, so a compositor
 that quietly ignores a move is caught.
-
-The tests look at whatever compositor is running and never touch it. They do
-need an idle screen: anything else animating on it will flip them.
-
-On Wayland a screenshot tool is required (`grim`, `gnome-screenshot` or
-`spectacle`), otherwise the pixel tests are skipped.
 
 | test | the defect it catches |
 | --- | --- |
@@ -45,13 +45,6 @@ On Wayland a screenshot tool is required (`grim`, `gnome-screenshot` or
 | `resize_check` | a frame drawn from a window pixmap that was not ready yet, during continuous resizing |
 | `offscreen_check` | a window hanging off the left or top edge showing the wrong part of itself |
 | `iconify_check` | a window not coming back correctly after being minimised |
-
-Each has been shown to fail on a deliberately broken build; a test that has
-never failed proves nothing. `shape_check` needs XShape. `stale_check` is the
-sensitive one. `motion_check` samples every fourth row, so a stale patch can
-slip between its samples. `resize_check` takes a `managed` argument to let the
-window manager frame the window; that mode false-positives about 1 time in 800
-by capturing mid-reframe, so read it alongside the plain mode.
 
 ## The power metric
 
