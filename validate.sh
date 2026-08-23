@@ -16,7 +16,7 @@ esac
 set -u
 QUICK=${QUICK:-0}
 BENCH_POWER_OPTIONAL=1
-source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/lib/common.sh"
 cd "$(dirname "$0")" || exit 1
 
 make -s all 2>/dev/null || make all || exit 1
@@ -127,7 +127,6 @@ else
     echo "  no video: this session has no recorder (ffmpeg on X11,"
     echo "  wf-recorder on labwc/COSMIC/sway, the shell's screencast on GNOME)"
 fi
-echo "  compare two sessions with: ./compare_runs.sh <this> <other>"
 echo
 
 echo "== stability: every workload at once, 20 s"

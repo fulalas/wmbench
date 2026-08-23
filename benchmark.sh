@@ -62,7 +62,7 @@ USAGE_PASSES=${USAGE_PASSES:-1}
 UNCAP_SECONDS=${UNCAP_SECONDS:-16}      # the one row that is timed, by design
 
 
-source "$(dirname "$0")/common.sh"
+source "$(dirname "$0")/lib/common.sh"
 cd "$(dirname "$0")" || exit 1
 
 make -s all 2>/dev/null || make all || exit 1

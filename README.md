@@ -26,11 +26,8 @@ fullscreen asking compositing to step aside with `_NET_WM_BYPASS_COMPOSITOR`.
 ## validate.sh and the checks
 
 `validate.sh` runs the checks, logs the geometry it asked for against what it
-got, photographs the window's own content, and films the pass where the
-session can be recorded. Two runs are compared with
-`./compare_runs.sh <A> <B>`: geometry with an allowance for decorations,
-pixels exactly. That is how a compositor that quietly ignores a move is
-caught.
+got, photographs the window's own content, and films the pass where the session
+can be recorded, so a compositor that quietly ignores a move is caught.
 
     make check      run the eight checks against the running compositor
 
@@ -62,16 +59,14 @@ by capturing mid-reframe, so read it alongside the plain mode.
 
 The following sensors are supported:
 
-- CPU - `energy_uj` for both AMD and Intel
-- AMD GPU - `power1_average`
-- Intel GPU - `energy1_input`, on the discrete cards
-- NVIDIA GPU - `nvidia-smi`, present in NVIDIA driver only, so mesa drivers
-  won't read it
+- CPU and Intel integrated GPU - `energy_uj`
+- Intel discrete GPU - `energy1_input`
+- AMD discrete/integrated GPU - `power1_average`
+- NVIDIA discrete GPU - `nvidia-smi`, present in NVIDIA driver only, so mesa
+  drivers won't read it
 
 When an integrated GPU is used, the power reading will combine CPU and GPU into
 a single value.
 
 The CPU sensor might be root-only on some machines. In this case, you are asked
 whether to open it with root, before anything is measured.
-
-Sensors are found by driver name, never by index.
