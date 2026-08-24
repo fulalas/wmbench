@@ -18,4 +18,8 @@
 XImage *capture_region (Display *d, Window root,
                         int x, int y, unsigned int w, unsigned int h);
 
+/* And back out again, as a binary PPM (P6). True when the whole file is
+   written. The one format the checks and the checkpoints both save in. */
+int capture_write_ppm (const char *path, XImage *img);
+
 #endif

@@ -39,6 +39,7 @@
 #include "capture.h"
 #include "polite.h"
 #include "gate.h"
+#include "now.h"
 #include "stage.h"
 
 #define WINW 900                /* the size a big screen uses */
@@ -120,15 +121,6 @@ static void mark (const char *s)
     fflush (stdout);
 }
 
-static double now (void)
-{
-    struct timespec ts;
-
-    clock_gettime (CLOCK_MONOTONIC, &ts);
-
-    return ts.tv_sec + ts.tv_nsec / 1e9;
-}
-
 static void step (void)
 {
     XSync (d, False);
@@ -193,29 +185,9 @@ static void checkpoint_of (Window w, const char *name,
     if (img != NULL)
     {
         char path[512];
-        FILE *f;
-        int x, y;
 
         snprintf (path, sizeof path, "%s/ck-%02d-%s.ppm", ckdir, cknum, name);
-        f = fopen (path, "wb");
-        if (f != NULL)
-        {
-            fprintf (f, "P6\n%d %d\n255\n", img->width, img->height);
-            for (y = 0; y < img->height; y++)
-            {
-                for (x = 0; x < img->width; x++)
-                {
-                    unsigned long v = XGetPixel (img, x, y);
-                    unsigned char rgb[3];
-
-                    rgb[0] = (v >> 16) & 0xff;
-                    rgb[1] = (v >> 8) & 0xff;
-                    rgb[2] = v & 0xff;
-                    fwrite (rgb, 1, 3, f);
-                }
-            }
-            fclose (f);
-        }
+        capture_write_ppm (path, img);
         XDestroyImage (img);
     }
     cknum++;
@@ -1241,13 +1213,13 @@ int main (int argc, char **argv)
     {
         mark ("MEASURE-START");
     }
-    start = now ();
+    start = bench_now ();
     do
     {
       if (want_phase ("windows"))
       {
         /* Maximize and back */
-        for (i = 0; i < 2 && (fixed || now () - start < seconds); i++)
+        for (i = 0; i < 2 && (fixed || bench_now () - start < seconds); i++)
         {
             set_state (wa, 1, state_max_h, state_max_v);
             step ();
@@ -1256,7 +1228,7 @@ int main (int argc, char **argv)
         }
 
         /* Minimize and back */
-        for (i = 0; i < 2 && (fixed || now () - start < seconds); i++)
+        for (i = 0; i < 2 && (fixed || bench_now () - start < seconds); i++)
         {
             XIconifyWindow (d, wa, scr);
             step ();
@@ -1344,7 +1316,7 @@ int main (int argc, char **argv)
       if (want_phase ("windows"))
       {
         /* Two windows raised over each other, the way alt-tab lands */
-        for (i = 0; i < 3 && (fixed || now () - start < seconds); i++)
+        for (i = 0; i < 3 && (fixed || bench_now () - start < seconds); i++)
         {
             XRaiseWindow (d, wb);
             step ();
@@ -1360,14 +1332,14 @@ int main (int argc, char **argv)
       }
         pass++;
     } while (tasks > 0 ? pass < tasks
-                       : (ckdir == NULL && now () - start < seconds));
+                       : (ckdir == NULL && bench_now () - start < seconds));
     if (tasks > 0)
     {
         mark ("MEASURE-END");
     }
 
     printf ("AVERAGE %.1f actions/s over %.1f s, %d actions\n",
-            actions / (now () - start), now () - start, actions);
+            actions / (bench_now () - start), bench_now () - start, actions);
 
     for (i = 0; i < 4; i++)
     {

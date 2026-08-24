@@ -256,5 +256,14 @@ int main (int argc, char **argv)
     printf ("suspend and resume: %d clean, %d wrong, %d proved nothing\n",
             ok, bad, inconclusive);
 
-    return (bad == 0 && inconclusive == 0 && ok > 0) ? 0 : 1;
+    /* 3 keeps a round that proved nothing apart from a round that went wrong:
+       a compositor that never suspends is not a compositor at fault. Only when
+       no round proved anything, though - one slow round does not throw away
+       the ones that answered. */
+    if (bad > 0)
+        return 1;
+    if (inconclusive >= rounds)
+        return 3;
+
+    return (ok > 0) ? 0 : 1;
 }

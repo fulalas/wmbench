@@ -22,6 +22,7 @@
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include "gate.h"
+#include "now.h"
 #include "stage.h"
 
 #define WINW 1000               /* the size a big screen uses */
@@ -122,15 +123,6 @@ static void probe_moves (Display *d, Window root, Window win,
         XSync (d, False);
         usleep (300000);
     }
-}
-
-static double now (void)
-{
-    struct timespec ts;
-
-    clock_gettime (CLOCK_MONOTONIC, &ts);
-
-    return ts.tv_sec + ts.tv_nsec / 1e9;
 }
 
 int main (int argc, char **argv)
@@ -234,7 +226,7 @@ int main (int argc, char **argv)
     warm = (tasks > 0) ? 60 : 0;        /* the first moves are not counted */
     probe_moves (d, root, win, cx, base_y, winw, winh);
 
-    start = now ();
+    start = bench_now ();
     mstart = start;
     for (i = 0; ; i++)
     {
@@ -273,7 +265,7 @@ int main (int argc, char **argv)
             if (i + 1 == warm)
             {
                 mark ("MEASURE-START");
-                mstart = now ();
+                mstart = bench_now ();
                 /*
                  * The gate in mark() can have held this for a long time, and
                  * the schedule below counts from start: left alone it would
@@ -292,7 +284,7 @@ int main (int argc, char **argv)
                 break;
             }
         }
-        else if (now () - start >= seconds)
+        else if (bench_now () - start >= seconds)
         {
             break;
         }
@@ -303,7 +295,7 @@ int main (int argc, char **argv)
          * free it just measures how fast this program can spam the server,
          * which came out at 89000 steps a second and composited none of them.
          */
-        while (now () < due)
+        while (bench_now () < due)
         {
             usleep (200);
         }
@@ -313,11 +305,11 @@ int main (int argc, char **argv)
     {
         mark ("MEASURE-END");
         printf ("AVERAGE %.1f steps/s over %.1f s, %ld steps\n",
-                steps / (now () - mstart), now () - mstart, done);
+                steps / (bench_now () - mstart), bench_now () - mstart, done);
     }
     else
     {
-        printf ("AVERAGE %.1f steps/s over %.0f s\n", steps / (now () - start),
+        printf ("AVERAGE %.1f steps/s over %.0f s\n", steps / (bench_now () - start),
                 seconds);
     }
 

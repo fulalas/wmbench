@@ -51,3 +51,17 @@ void polite_activate (Display *d, Window root, Window w)
                 (XEvent *) &ev);
     XSync (d, False);
 }
+
+/*
+ * Ask to be kept above the other windows, before the window is mapped: as an
+ * initial state the window manager reads it while framing, and one raise
+ * afterwards would not survive a load that keeps raising its own windows.
+ */
+void polite_keep_above (Display *d, Window w)
+{
+    Atom above = XInternAtom (d, "_NET_WM_STATE_ABOVE", False);
+
+    XChangeProperty (d, w, XInternAtom (d, "_NET_WM_STATE", False),
+                     XA_ATOM, 32, PropModeReplace,
+                     (unsigned char *) &above, 1);
+}

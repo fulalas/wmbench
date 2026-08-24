@@ -21,7 +21,8 @@
  * the comment on wait_for_pixmap() was measuring; the window's position moves as
  * it is reframed, so it is looked up every step.
  *
- * Exit status 0 when every capture was one coherent frame.
+ * Exit status: 0 every capture was one coherent frame, 1 one was not, 2 it
+ * could not run, 3 it was covered throughout and proved nothing. See the README.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -318,6 +319,16 @@ int main (int argc, char **argv)
             "%d with a band at an edge, %d proved nothing\n",
             clean, incoherent, foreign, edge_bad, blind);
 
-    return (incoherent == 0 && foreign == 0 && edge_bad == 0 && clean > 0)
-           ? 0 : 1;
+    if (incoherent > 0 || foreign > 0 || edge_bad > 0)
+    {
+        return 1;
+    }
+    /* Covered throughout, so every step was somebody else's pixels: no answer
+       either way, which is not the same as a fault. See the README. */
+    if (clean == 0)
+    {
+        return (blind > 0) ? 3 : 1;
+    }
+
+    return 0;
 }

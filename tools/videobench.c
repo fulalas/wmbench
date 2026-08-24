@@ -27,6 +27,7 @@
 #include <X11/extensions/XShm.h>
 
 #include "gate.h"
+#include "now.h"
 
 /*
  * Fixed work: BENCH_TASKS=N does exactly N tasks, however long that takes, so
@@ -49,15 +50,6 @@ static void mark (const char *s)
     }
     printf ("%s\n", s);
     fflush (stdout);
-}
-
-static double now (void)
-{
-    struct timespec ts;
-
-    clock_gettime (CLOCK_MONOTONIC, &ts);
-
-    return ts.tv_sec + ts.tv_nsec / 1e9;
 }
 
 int main (int argc, char **argv)
@@ -161,7 +153,7 @@ int main (int argc, char **argv)
 
     tasks = bench_tasks ();
     warm = (tasks > 0) ? 10 : 0;
-    start = now ();
+    start = bench_now ();
     mstart = start;
     for (i = 0; ; i++)
     {
@@ -191,7 +183,7 @@ int main (int argc, char **argv)
             if (i + 1 == warm)
             {
                 mark ("MEASURE-START");
-                mstart = now ();
+                mstart = bench_now ();
                 /*
                  * The gate in mark() can have held this a long time, and the
                  * schedule counts from start: left alone it would run flat out
@@ -209,12 +201,12 @@ int main (int argc, char **argv)
                 break;
             }
         }
-        else if (now () - start >= seconds)
+        else if (bench_now () - start >= seconds)
         {
             break;
         }
 
-        while (now () < due)
+        while (bench_now () < due)
         {
             usleep (200);
         }
@@ -224,12 +216,12 @@ int main (int argc, char **argv)
     {
         mark ("MEASURE-END");
         printf ("AVERAGE %.1f frames/s over %.1f s, %ld frames\n",
-                frames / (now () - mstart), now () - mstart, done);
+                frames / (bench_now () - mstart), bench_now () - mstart, done);
     }
     else
     {
         printf ("AVERAGE %.1f frames/s over %.0f s\n",
-                frames / (now () - start), seconds);
+                frames / (bench_now () - start), seconds);
     }
 
     XShmDetach (d, &shm);

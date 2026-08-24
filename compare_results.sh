@@ -10,8 +10,18 @@ esac
 set -u
 DIR=${1:-$(dirname "$0")/results}
 [ -d "$DIR" ] || { echo "no such folder: $DIR"; exit 1; }
-set -- "$DIR"/benchmark-*.txt
-[ -r "$1" ] || { echo "no benchmark results in $DIR"; exit 1; }
+# Only reports that carry the data block at the end can be read; a report from
+# before it existed is skipped whole rather than averaged in with no rows of its
+# own, which would mix one run's numbers with another's energy and frame rate.
+FILES=()
+for f in "$DIR"/benchmark-*.txt; do
+    grep -q '^row: ' "$f" 2>/dev/null && FILES+=("$f")
+done
+if [ "${#FILES[@]}" = 0 ]; then
+    echo "no readable benchmark results in $DIR"
+    echo "(a report needs the '== data' block that benchmark.sh writes)"
+    exit 1
+fi
 
 awk '
 function key_of(path) {
@@ -37,15 +47,17 @@ function key_of(path) {
 
     return kk;
 }
-function add(kk, label, w, c, t) {
+# A column that could not be measured is left out of its average rather than
+# counted as a zero, which is why each one carries its own count
+function add(kk, label, w, c) {
     if (!(label in rowseen)) { rowseen[label] = 1; rows[++nrows] = label }
-    pw[kk, label] += w; cpu[kk, label] += c; el[kk, label] += t;
-    cnt[kk, label]++;
+    if (w != "-") { pw[kk, label] += w; pwn[kk, label]++ }
+    if (c != "-") { cpu[kk, label] += c; cpun[kk, label]++ }
 }
-function val(kk, label, a) {
-    return cnt[kk, label] ? a[kk, label] / cnt[kk, label] : ""
+function val(kk, label, a, n) {
+    return n[kk, label] ? a[kk, label] / n[kk, label] : ""
 }
-function table(what, a, unit,    i, j, k2, line, v) {
+function table(what, a, n, unit,    i, j, k2, line, v) {
     printf "%-18s", what;
     for (j = 1; j <= nkeys; j++) printf "%16s", hdr1[order[j]];
     printf "\n%-18s", "";
@@ -57,7 +69,7 @@ function table(what, a, unit,    i, j, k2, line, v) {
         printf "%-18s", rows[i];
         for (j = 1; j <= nkeys; j++)
         {
-            v = val(order[j], rows[i], a);
+            v = val(order[j], rows[i], a, n);
             if (v == "") printf "%16s", "-";
             else printf "%16.2f", v;
         }
@@ -70,7 +82,7 @@ function table(what, a, unit,    i, j, k2, line, v) {
     printf "%-18s", "total";
     for (j = 1; j <= nkeys; j++)
     {
-        v = val(order[j], "total", a);
+        v = val(order[j], "total", a, n);
         if (v == "") printf "%16s", "-"; else printf "%16.2f", v;
     }
     printf "   %s\n\n", unit;
@@ -95,24 +107,21 @@ FNR == 1 {
     disp[k] = line;
 }
 /^session:/  { if ($2 == "x11") isx11[k] = 1 }
-/^compositor:/ { comp[k] = $2 " " $3 }
+/^compositor:/ { comp[k] = $2 " " $3; if (/compositing OFF/) nocomp[k] = 1 }
 /^work:/     { sub (/^work: */, ""); work[k] = $0 }
 /^energy:/   { en[k] += $2; enn[k]++ }
 /^speed:/                       { fps[k] += $2;   fpsn[k]++ }
 /fps fullscreen$/               { fsf[k] += $1;   fsn[k]++ }
 /fps fullscreen, asking/        { byf[k] += $1;   byn[k]++ }
 
-# total          12.51 W (avg.)          2.50 s       156.7 s
-/^total/ {
-    add(k, "total", $2, $5, $7);
-    next
-}
-
-# idle                   4.80 W          0.00 s        20.0 s
-NF >= 7 && $NF == "s" && $(NF - 2) == "s" && $(NF - 4) == "W" {
-    label = $1;
-    for (i = 2; i <= NF - 6; i++) label = label " " $i;
-    add(k, label, $(NF - 5), $(NF - 3), $(NF - 1));
+# row: <watts> <cpu seconds> <seconds elapsed> <name>, as benchmark.sh writes
+# it at the end of its report, with a "-" for a column it could not measure.
+# The pretty table above it is for people: its columns move whenever the
+# wording does, so it is not what is read here.
+/^row: / {
+    label = $5;
+    for (i = 6; i <= NF; i++) label = label " " $i;
+    add(k, label, $2, $3);
 }
 
 
@@ -122,9 +131,9 @@ END {
     if (nkeys == 0) { print "nothing to compare"; exit 1 }
 
     print "== power, watts (lower is better)";
-    table("workload", pw, "average while working");
+    table("workload", pw, pwn, "average while working");
     print "== compositor CPU, seconds (lower is better)";
-    table("workload", cpu, "for the whole job");
+    table("workload", cpu, cpun, "for the whole job");
 
     print "== energy for all the work, joules (lower is better)";
     printf "%-18s", "energy";
@@ -163,13 +172,12 @@ END {
             printf "    %-14s %s\n", order[j], disp[order[j]];
     }
 
-    # A window manager that does not composite is the floor, not a rival
+    # A window manager that does not composite is the floor, not a rival. It
+    # said so itself when it ran; a low processor total is not the same thing,
+    # since a cheap compositor has one too.
     for (j = 1; j <= nkeys; j++)
-    {
-        c = val(order[j], "total", cpu);
-        if (c != "" && c < 1.0)
+        if (nocomp[order[j]])
             printf "* %s is not compositing: read it as the floor\n", order[j];
-    }
 
     printf "* the second fullscreen row asks compositing to step aside: less power there means the desktop did it\n";
 
@@ -184,13 +192,14 @@ END {
     for (j = 1; j <= nkeys; j++)
     {
         k2 = order[j];
-        v = val(k2, "total", pw);   if (v != "" && v < bw) { bw = v; bwk = k2 }
-        v = val(k2, "total", cpu);  if (v != "" && v < bc) { bc = v; bck = k2 }
+        v = val(k2, "total", pw, pwn);   if (v != "" && v < bw) { bw = v; bwk = k2 }
+        v = val(k2, "total", cpu, cpun);  if (v != "" && v < bc) { bc = v; bck = k2 }
         v = (fpsn[k2] ? fps[k2] / fpsn[k2] : 0);
         if (v > bf) { bf = v; bfk = k2 }
     }
-    printf "* cheapest: %s, %.2f W\n", bwk, bw;
-    printf "* least processor time: %s, %.2f s\n", bck, bc;
-    printf "* fastest: %s, %.1f fps\n", bfk, bf;
+    # Nothing wins a column that nobody could measure
+    if (bwk != "") printf "* cheapest: %s, %.2f W\n", bwk, bw;
+    if (bck != "") printf "* least processor time: %s, %.2f s\n", bck, bc;
+    if (bfk != "") printf "* fastest: %s, %.1f fps\n", bfk, bf;
 }
-' "$@"
+' "${FILES[@]}"

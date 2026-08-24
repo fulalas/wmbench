@@ -10,4 +10,9 @@
 
 void polite_activate (Display *d, Window root, Window w);
 
+/* Stay on top, asked before the window is mapped. A check that has to keep
+   photographing its own window through a load needs this: covered, it is
+   photographing somebody else. */
+void polite_keep_above (Display *d, Window w);
+
 #endif

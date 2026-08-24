@@ -86,7 +86,7 @@ DE=$(echo "${XDG_CURRENT_DESKTOP:-unknown}" | tr '[:upper:]' '[:lower:]' | tr ':
 WMVER=$(wm_version | tr '-' '.')
 OUT="results/benchmark-$(date +%Y%m%d-%H%M%S)-$(hostname)-$DE-$WM_NAME-${WMVER:-unknown}-$ST.txt"
 mkdir -p results
-exec > >(tee "$OUT") 2>&1
+tee_report "$OUT"
 
 # Ctrl-C at any moment: take the running benchmark, the power watcher and
 # the tee down with us. The whole process group when we lead it (the normal
@@ -118,6 +118,9 @@ else
     COMPOSITING=OFF
 fi
 echo "compositor: $WM_NAME $(wm_version) (compositing $COMPOSITING)"
+[ -z "$WM_PID" ] &&
+    echo "            its process cannot be seen, so the processor column is" &&
+    echo "            left empty rather than filled with zeros"
 [ "$POWER_OK" = 1 ] && echo "power:      $POWER_DESC" \
                      || echo "power:      no sensor, not reported"
 [ "$COMPOSITING" = OFF ] &&
@@ -143,8 +146,15 @@ for t in $TESTS; do
 done
 echo "running tests — do not use the computer (~$(( (EST + 59) / 60 )) min)"
 
-wm_cpu () { [ -n "$WM_PID" ] && cpu_of "$WM_PID" 2>/dev/null || echo 0; }
 now_s () { date +%s.%N; }
+
+# Processor seconds between two wm_cpu readings, or "-" when either reading is
+# missing (no visible process) or the counter went backwards (the process was
+# replaced while we watched)
+cpu_delta () {                  # $1 before, $2 after
+    awk -v a="$1" -v b="$2" 'BEGIN{
+        print (a == "" || b == "" || b < a) ? "-" : sprintf ("%.2f", (b - a) / 1000)}'
+}
 
 # The idle baseline: no tasks to count, so a fixed window everywhere.
 # Prints "watts cpu_seconds duration".
@@ -156,8 +166,8 @@ idle_window () {
         power_sample; sleep 0.1
     done
     c1=$(wm_cpu); w=$(power_end)
-    awk -v a=$c0 -v b=$c1 -v w="$w" -v t="$1" \
-        'BEGIN{printf "%s %.2f %.1f", w, (b-a)/1000, t}'
+    awk -v w="$w" -v c="$(cpu_delta "$c0" "$c1")" -v t="$1" \
+        'BEGIN{printf "%s %s %.1f", w, c, t}'
 }
 
 # A fixed amount of work, however long it takes. The tool announces when its
@@ -186,8 +196,8 @@ measure () {                    # $1 row name, $2 task count, $3... the load
     wait "$pid" || return 1
     grep -q MEASURE-END "$log" || return 1
 
-    awk -v a=$c0 -v b=$c1 -v w="$w" -v t0="$t0" -v t1="$t1" \
-        'BEGIN{printf "%s %.2f %.1f", w, (b-a)/1000, t1-t0}'
+    awk -v w="$w" -v c="$(cpu_delta "$c0" "$c1")" -v t0="$t0" -v t1="$t1" \
+        'BEGIN{printf "%s %s %.1f", w, c, t1 - t0}'
 }
 
 IDLE=""; USAGE=""; MOVE=""; RESIZE=""; DND=""; POP=""; RENDER=""; UNCAP=""
@@ -203,33 +213,38 @@ running () {                    # $1 the name of the test now under way
 done_running () { printf '\033[2K\r' >&3; }
 
 RULE=$(printf '\u2500%.0s' $(seq 61))
+# The table is for people. Every row is also kept as one plain line, printed
+# together at the end for compare_results.sh to read: the columns above move
+# whenever the wording does, and a reader that has to work out where they are
+# drops rows silently when it guesses wrong.
+DATA=()
 print_row () {                  # $1 label, $2 "watts cpu_s seconds"
     local w c t
     done_running
     [ -n "$2" ] || return 0
     read -r w c t <<< "$2"
-    if [ "$w" = "-" ]; then
-        printf '%-17s%14s%16s%14s\n' "$1" "-" "$c s" "$t s"
-    else
-        printf '%-17s%14s%16s%14s\n' "$1" "$w W" "$c s" "$t s"
-    fi
+    DATA+=("$w $c $t $1")
+    [ "$w" = "-" ] || w="$w W"
+    [ "$c" = "-" ] || c="$c s"
+    printf '%-17s%14s%16s%14s\n' "$1" "$w" "$c" "$t s"
 }
 
 # Each row is printed the moment its test is over, so the run can be watched,
 # and counted towards the total as it goes. Seconds add; power does not -
 # watts are a rate, so they are averaged over the time they were drawn. Idle
 # is the baseline and no part of the total.
-TCPU=0; TTIME=0; TENERGY=0; TROWS=0; TPOWER=1
+TCPU=0; TTIME=0; TENERGY=0; TROWS=0; TPOWER=1; TCPUOK=1
 tally () {                      # $1 label, $2 "watts cpu_s seconds"
     local rw rc rt
     [ -n "$2" ] || return 0
     print_row "$1" "$2"
     read -r rw rc rt <<< "$2"
     [ "$rw" = "-" ] && TPOWER=0
+    [ "$rc" = "-" ] && TCPUOK=0
     TROWS=$((TROWS + 1))
     read -r TCPU TTIME TENERGY <<< "$(awk -v c="$TCPU" -v t="$TTIME" \
         -v e="$TENERGY" -v rc="$rc" -v rt="$rt" -v rw="$rw" 'BEGIN{
-            printf "%.2f %.1f %.3f", c + rc, t + rt,
+            printf "%.2f %.1f %.3f", c + ((rc == "-") ? 0 : rc), t + rt,
                    e + ((rw == "-") ? 0 : rw * rt)}')"
 }
 
@@ -311,55 +326,22 @@ fi
 # last of them has finished the lot.
 if want stress; then
     running "stress"
-    # The counts are set so that at their fixed rates all five have the same
-    # amount of work to get through as the render does, and all five pace
-    # themselves the same way, so on a slow machine they fall behind together
-    # and still finish together. That is why the window being resized here is
-    # movebench and not the scripted person: a pass of the latter is some ten
-    # seconds long whatever the count, so it could only ever land near the
-    # others by luck. manywin only puts windows on the screen: it is scenery,
-    # it counts nothing, and it is killed at the end rather than ending
-    # anything.
-    #
-    # Everything is started first and then held at the gate, so the stack can
-    # be arranged and no task at all is done before the whole load is up. See
-    # gate.c.
+    # The window being resized is movebench and not the scripted person: a pass
+    # of the latter is some ten seconds long whatever the count, so it could
+    # only ever land near the others by luck. manywin only puts windows on the
+    # screen: it is scenery, it counts nothing, and it is killed at the end
+    # rather than ending anything.
     GO="$PWD/bm-stress.go"; rm -f "$GO"
-    S_MOVE=$((2 * RENDER_FRAMES))                 # 120 a second
-    S_POP=$(( (RENDER_FRAMES + 2) / 3 ))          # 20 a second
-    S_TRANS=$RENDER_FRAMES                        # 60 a second
-    S_RESIZE=$((2 * RENDER_FRAMES))               # 120 a second
     ./tools/manywin 12 > bm-many.log 2>&1 &
     MANY=$!
-    SL=(); SP=(); SEND=()
-    load () {                   # $1 log, $2 tasks, $3... the program
-        local log=$1 tasks=$2
-        shift 2
-        : > "$log"
-        BENCH_GO="$GO" BENCH_TASKS=$tasks "$@" >> "$log" 2>&1 &
-        SL+=("$log"); SP+=("$!")
-    }
-    load bm-smove.log   "$S_MOVE"   ./tools/movebench 0 move 120
-    load bm-spop.log    "$S_POP"    ./tools/popbench 0 20 4
-    load bm-strans.log  "$S_TRANS"  ./tools/transbench 0 0.75 60
-    load bm-sresize.log "$S_RESIZE" ./tools/movebench 0 resize 120
-    load bm-srender.log "$RENDER_FRAMES" ./tools/fsbench2 0 windowed 60
-
-    # Wait until every one of them is set up and waiting at the gate. A
-    # program that is still drawing its content when the gate opens is not
-    # held by it, so it would start as late as its setup took and the whole
-    # mix would be staggered by that much. See gate.c.
-    for i in "${!SL[@]}"; do
-        while ! grep -q MEASURE-READY "${SL[$i]}" 2>/dev/null; do
-            kill -0 "${SP[$i]}" 2>/dev/null || break
-            sleep 0.1
-        done
-    done
+    # The mix itself, the work each load does and the order they are stacked in
+    # all live in lib/common.sh, so validate.sh means the same load by it
+    stress_start "$GO" bm-s
+    SL=("${STRESS_LOGS[@]}"); SP=("${STRESS_PIDS[@]}"); SEND=()
+    stress_wait_ready
 
     # Everything is on screen now, so the stack can be put in a named order
-    ./tools/restack -w "fsbench" "popbench background" "transbench background" \
-              "manywin" "movebench resize" "movebench" \
-              "transbench translucent" >/dev/null
+    ./tools/restack -w "${STRESS_STACK[@]}" >/dev/null
     : > "$GO"
 
     for l in "${SL[@]}"; do
@@ -397,8 +379,9 @@ if want stress; then
             printf "%.0f", 100 * (t1 - lo) / (t1 - t0)}')
     if [ "$OK" = 1 ]; then
         W=$(power_end)
-        STRESS=$(awk -v a=$C0 -v b=$C1 -v w="$W" -v t0="$T0" -v t1="$T1" \
-                 'BEGIN{printf "%s %.2f %.1f", w, (b-a)/1000, t1-t0}')
+        STRESS=$(awk -v w="$W" -v c="$(cpu_delta "$C0" "$C1")" \
+                     -v t0="$T0" -v t1="$T1" \
+                     'BEGIN{printf "%s %s %.1f", w, c, t1 - t0}')
     else
         LOADFAIL="$LOADFAIL stress"
     fi
@@ -435,13 +418,16 @@ fi
 if [ "$TROWS" -gt 0 ] && [ -z "$LOADFAIL" ]; then
     echo "$RULE"
     if [ "$TPOWER" = 1 ]; then
-        printf '%-17s%14s%16s%14s\n' total \
-               "$(awk -v e="$TENERGY" -v t="$TTIME" \
-                  'BEGIN{printf "%.2f W (avg.)", (t ? e / t : 0)}')" \
-               "$TCPU s" "$TTIME s"
+        TW=$(awk -v e="$TENERGY" -v t="$TTIME" \
+             'BEGIN{printf "%.2f", (t ? e / t : 0)}')
     else
-        printf '%-17s%14s%16s%14s\n' total "-" "$TCPU s" "$TTIME s"
+        TW="-"
     fi
+    [ "$TCPUOK" = 1 ] && TC=$TCPU || TC="-"
+    DATA+=("$TW $TC $TTIME total")
+    [ "$TW" = "-" ] || TW="$TW W (avg.)"
+    [ "$TC" = "-" ] || TC="$TC s"
+    printf '%-17s%14s%16s%14s\n' total "$TW" "$TC" "$TTIME s"
     # The one number for all of it: watts spent over the seconds they were
     # spent in. Idle is the baseline and no part of it.
     [ "$TPOWER" = 1 ] && awk -v e="$TENERGY" \
@@ -470,9 +456,19 @@ if [ "$TROWS" -gt 0 ] && [ -z "$LOADFAIL" ] && [ "$ST" = x11 ]; then
     echo "On X11 part of the compositing happens inside the X server, whose"
     echo "processor time is not measured here."
 fi
+
+# The rows again, for compare_results.sh: watts, compositor seconds, seconds
+# elapsed, then the name. A "-" is a column this machine could not measure.
+if [ "${#DATA[@]}" != 0 ]; then
+    echo
+    echo "== data"
+    for r in "${DATA[@]}"; do
+        echo "row: $r"
+    done
+fi
 if [ -n "$LOADFAIL" ]; then
-    echo "FAILED to run:$LOADFAIL - the rows are missing above; their logs"
-    echo "are kept as bm-*.log"
+    red "FAILED to run:$LOADFAIL - the rows are missing above; their logs"
+    red "are kept as bm-*.log"
 else
     rm -f bm-*.log
 fi

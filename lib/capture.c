@@ -110,6 +110,42 @@ out:
     return img;
 }
 
+int capture_write_ppm (const char *path, XImage *img)
+{
+    FILE *f;
+    unsigned char *row;
+    int x, y, ok = 1;
+
+    f = fopen (path, "wb");
+    if (f == NULL)
+    {
+        return 0;
+    }
+    row = malloc ((size_t) img->width * 3);
+    if (row == NULL)
+    {
+        fclose (f);
+
+        return 0;
+    }
+    fprintf (f, "P6\n%d %d\n255\n", img->width, img->height);
+    for (y = 0; y < img->height && ok; y++)
+    {
+        for (x = 0; x < img->width; x++)
+        {
+            unsigned long p = XGetPixel (img, x, y);
+
+            row[x * 3] = (p >> 16) & 0xff;
+            row[x * 3 + 1] = (p >> 8) & 0xff;
+            row[x * 3 + 2] = p & 0xff;
+        }
+        ok = fwrite (row, 3, (size_t) img->width, f) == (size_t) img->width;
+    }
+    free (row);
+
+    return fclose (f) == 0 && ok;
+}
+
 /* A failed grab must come back as no image, not as a killed process */
 static int swallow_x_error (Display *dd, XErrorEvent *e)
 {

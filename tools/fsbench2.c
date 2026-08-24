@@ -26,6 +26,7 @@
 #include <epoxy/glx.h>
 #include "polite.h"
 #include "gate.h"
+#include "now.h"
 #include "stage.h"
 
 static const char *vs_src =
@@ -82,13 +83,6 @@ static void mark (const char *s)
     }
     printf ("%s\n", s);
     fflush (stdout);
-}
-
-static double now (void)
-{
-    struct timespec ts;
-    clock_gettime (CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec + ts.tv_nsec / 1e9;
 }
 
 static GLuint compile (GLenum type, const char *src)
@@ -247,12 +241,12 @@ int main (int argc, char **argv)
 
     tasks = bench_tasks ();
     warm = (tasks > 0) ? 120 : 0;       /* shaders and the first frames */
-    start = last = mstart = now ();
+    start = last = mstart = bench_now ();
     frames = window_frames = 0;
     for (;;)
     {
         XWindowAttributes wa;
-        double t = now ();
+        double t = bench_now ();
 
         while (XPending (d))
         {
@@ -276,7 +270,7 @@ int main (int argc, char **argv)
             if (frames == warm)
             {
                 mark ("MEASURE-START");
-                mstart = now ();
+                mstart = bench_now ();
                 /* The gate in mark() may have held us; pace from here on */
                 next_frame = 0.0;
             }
@@ -286,7 +280,7 @@ int main (int argc, char **argv)
                 break;
             }
         }
-        else if (now () - start >= seconds)
+        else if (bench_now () - start >= seconds)
         {
             break;
         }
@@ -300,7 +294,7 @@ int main (int argc, char **argv)
                 next_frame = t;
             }
             next_frame += frame_budget;
-            due = next_frame - now ();
+            due = next_frame - bench_now ();
             if (due > 0.0)
             {
                 struct timespec ts;
@@ -311,7 +305,7 @@ int main (int argc, char **argv)
             }
             else
             {
-                next_frame = now ();
+                next_frame = bench_now ();
             }
         }
 
@@ -328,11 +322,11 @@ int main (int argc, char **argv)
     {
         mark ("MEASURE-END");
         printf ("AVERAGE %.2f fps over %.1f s, %ld frames\n",
-                done / (now () - mstart), now () - mstart, done);
+                done / (bench_now () - mstart), bench_now () - mstart, done);
     }
     else
     {
-        printf ("AVERAGE %.2f fps over %.0f s\n", frames / (now () - start),
+        printf ("AVERAGE %.2f fps over %.0f s\n", frames / (bench_now () - start),
                 seconds);
     }
     glXMakeCurrent (d, None, NULL);

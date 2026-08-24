@@ -10,8 +10,10 @@ be put side by side.
     ./compare_results.sh    put the saved runs side by side
 
 Both entry points build what they need, work out which compositor is running,
-and save their table under `results/`. With no power sensor everything still
-runs and the power column reads `-`.
+and save their table under `results/`. Whichever window manager is running says
+so itself, so replacing one mid-session is noticed. A column that cannot be
+measured reads `-`: power with no sensor, compositor CPU with no visible
+process.
 
 ## benchmark.sh
 
@@ -24,12 +26,16 @@ fullscreen asking compositing to step aside with `_NET_WM_BYPASS_COMPOSITOR`.
 
 ## validate.sh
 
-Eight tests, each hunting one visual defect. `validate.sh` runs them all, logs
-the geometry it asked for against what it got, photographs the window's own
-content, and films the pass where the session can be recorded, so a compositor
-that quietly ignores a move is caught.
+Nine tests, each hunting one visual defect. `validate.sh` runs them all, then
+logs the geometry it asked for against what it got and photographs the window's
+own content, so a compositor that quietly ignores a move is caught.
 
 The tests need an idle screen, otherwise they might fail.
+
+Each test answers with one of four statuses, which is what the report prints:
+**passed**, **failed** (the compositor is at fault), **could not run** (no
+display, no way to photograph the screen) and **not available** (the compositor
+does not do the thing being tested, so nothing was proved either way).
 
 On Wayland a screenshot tool is required (`grim`, `gnome-screenshot` or
 `spectacle`), otherwise the pixel tests are skipped.
@@ -44,6 +50,11 @@ On Wayland a screenshot tool is required (`grim`, `gnome-screenshot` or
 | `resize_check` | a frame drawn from a window pixmap that was not ready yet, during continuous resizing |
 | `offscreen_check` | a window hanging off the left or top edge showing the wrong part of itself |
 | `iconify_check` | a window not coming back correctly after being minimised |
+| `leftover_check` | garbage left on the desktop by the load, by comparing the idle screen before it with the same screen after |
+
+The stability pass at the end runs everything at once, all of it started and
+finished together, with `motion_check`'s pattern scrolling in the middle of it:
+the same question asked of a compositor that is busy.
 
 ## The power metric
 

@@ -7,16 +7,35 @@
  *
  *   motion_check [captures]
  *
- * Exit status 0 when every capture was one clean frame.
+ * Three environment variables put it inside the stress mix, which is how
+ * validate.sh asks the same question of a compositor that is busy: BENCH_ABOVE
+ * keeps the window on top, BENCH_SECONDS caps how long it looks and spreads the
+ * captures over that time, and BENCH_GO holds it at the starting gate.
+ *
+ * Exit status: 0 every capture was one clean frame, 1 one was not, 2 it could
+ * not run, 3 it was covered throughout and proved nothing. See the README.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include "capture.h"
 #include "polite.h"
+#include "gate.h"
+#include "now.h"
+
+/* Seconds to keep looking, whatever the count, or none. In the stress mix the
+   load ends on the clock and there is no point capturing an idle screen after
+   it. */
+static double bench_seconds (void)
+{
+    const char *e = getenv ("BENCH_SECONDS");
+
+    return (e != NULL && *e != '\0') ? atof (e) : 0.0;
+}
 
 #define BAND    40
 #define NCOL    8
@@ -59,9 +78,10 @@ int main (int argc, char **argv)
     GC gc;
     XImage *img;
     XWindowAttributes wa;
-    int scr, want = (argc > 1) ? atoi (argv[1]) : 30;
+    int scr, want = (argc > 1) ? atoi (argv[1]) : 0;
     int captures = 0, clean = 0, torn = 0, unknown = 0;
     int offset = 0, i, x, y, ox, oy;
+    double limit, t0, pace, due;
 
     d = XOpenDisplay (NULL);
     if (d == NULL)
@@ -76,6 +96,14 @@ int main (int argc, char **argv)
     win = XCreateSimpleWindow (d, root, 100, 100, WINW, WINH, 0,
                                BlackPixel (d, scr), BlackPixel (d, scr));
     XStoreName (d, win, "motion_check");
+    /*
+     * In the middle of the stress mix this window has to stay on top: covered,
+     * every capture is of somebody else's pixels and proves nothing.
+     */
+    if (getenv ("BENCH_ABOVE") != NULL)
+    {
+        polite_keep_above (d, win);
+    }
     XSelectInput (d, win, ExposureMask | StructureNotifyMask);
     XMapRaised (d, win);
     gc = XCreateGC (d, win, 0, NULL);
@@ -96,7 +124,23 @@ int main (int argc, char **argv)
         XTranslateCoordinates (d, win, root, 0, 0, &ox, &oy, &child);
     }
 
-    while (captures < want)
+    /* Everything is up: in a mix, start when the rest of the load does */
+    bench_wait_go ();
+    limit = bench_seconds ();
+    if (want <= 0)
+    {
+        want = (limit > 0) ? INT_MAX : 30;
+    }
+    /*
+     * Given both a count and a time, spread the captures over the time. Taken
+     * flat out they are a load in themselves - a whole region read back from
+     * the server each time - and in the stress mix that would be weight added
+     * to the very thing being watched.
+     */
+    pace = (limit > 0 && want < INT_MAX) ? limit / want : 0;
+    t0 = bench_now ();
+
+    while (captures < want && (limit <= 0 || bench_now () - t0 < limit))
     {
         int fits = -1;
 
@@ -187,6 +231,13 @@ int main (int argc, char **argv)
 
         XDestroyImage (img);
         offset += BAND / 4;
+
+        /* Wait for this capture's slot to be over before taking the next */
+        due = t0 + captures * pace;
+        if (pace > 0 && due > bench_now ())
+        {
+            usleep ((useconds_t) ((due - bench_now ()) * 1e6));
+        }
     }
 
     XDestroyWindow (d, win);
@@ -195,5 +246,16 @@ int main (int argc, char **argv)
     printf ("%d captures: %d clean, %d torn or stale, %d not our pattern\n",
             captures, clean, torn, unknown);
 
-    return (torn == 0 && clean > 0) ? 0 : 1;
+    if (torn > 0)
+    {
+        return 1;
+    }
+    /* Nothing but somebody else's pixels: covered the whole time, in the
+       stress mix most likely, and no answer either way. See validate.sh. */
+    if (clean == 0)
+    {
+        return (unknown > 0) ? 3 : 1;
+    }
+
+    return 0;
 }

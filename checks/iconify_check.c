@@ -199,5 +199,12 @@ int main (int argc, char **argv)
     printf ("minimise and restore: %d clean, %d wrong, %d proved nothing\n",
             ok, bad, inconclusive);
 
-    return (bad == 0 && inconclusive == 0 && ok > 0) ? 0 : 1;
+    /* 3 keeps a round that proved nothing apart from a round that went wrong,
+       and only when no round proved anything at all */
+    if (bad > 0)
+        return 1;
+    if (ok == 0)
+        return (inconclusive > 0) ? 3 : 1;
+
+    return 0;
 }

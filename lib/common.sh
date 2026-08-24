@@ -316,9 +316,26 @@ amdgpu_device () {
     return 1
 }
 
-# Processor time a process has used, in milliseconds. Quantised to one clock
-# tick over the run, so at 16 seconds it cannot resolve better than 0.6 ms/s.
-cpu_of () { awk '{print ($14 + $15) * 1000 / 100}' "/proc/$1/stat"; }
+
+# The compositor's processor time in milliseconds: the window manager plus any
+# helper of its own that draws, which for compiz is the program that paints its
+# window frames. Prints nothing at all when there is no readable process, so a
+# session where this cannot be measured says so instead of reporting zero.
+# Quantised to one clock tick over the run, so at 16 seconds it cannot resolve
+# better than 0.6 ms/s. Read with builtins alone: this sits between reading the
+# counter and starting the clock at every measurement boundary, and an exec
+# there would be measured along with the compositor.
+wm_cpu () {
+    local p f ticks=""
+    for p in ${WM_PIDS:-}; do
+        # The process can go between looking and reading, so let the read be
+        # the test: no answer is no answer, not a zero
+        read -r -a f < "/proc/$p/stat" 2>/dev/null || continue
+        [ -n "${f[13]:-}" ] || continue
+        ticks=$(( ${ticks:-0} + f[13] + f[14] ))
+    done
+    [ -n "$ticks" ] && echo $((ticks * 10))
+}
 
 all_cpu () { awk '/^cpu /{print ($2+$3+$4+$6+$7+$8) * 1000 / 100}' /proc/stat; }
 
@@ -398,44 +415,21 @@ display_info () {
     echo "${res:-unknown}, scale ${scale:-1}"
 }
 
-# Record the screen into $1.<ext> until stop_recorder. Sets RECFILE, or
-# fails when this session has no way to record. X11: ffmpeg. Wayland:
-# wf-recorder where the compositor offers screencopy (labwc, COSMIC, sway),
-# GNOME through its shell's own screencast service. No root anywhere.
-start_recorder () {
-    local res
-    RECPID=""; RECMODE=""; RECFILE=""
+# Green for what passed, red for what did not, and only when the output is a
+# terminal: a result file has no use for escape codes.
+if [ -t 1 ]; then
+    RED=$'\033[31m'; GREEN=$'\033[32m'; OFF=$'\033[0m'
+else
+    RED=""; GREEN=""; OFF=""
+fi
+green () { printf '%s%s%s\n' "$GREEN" "$*" "$OFF"; }
+red   () { printf '%s%s%s\n' "$RED" "$*" "$OFF"; }
 
-    if [ "$(session_type)" = x11 ]; then
-        res=$(xrandr --current 2>/dev/null |
-              awk '/ current /{gsub(",","",$10); print $8 "x" $10; exit}')
-        RECFILE="$1.mkv"
-        ffmpeg -loglevel quiet -f x11grab -framerate 30                -video_size "${res:-1920x1080}" -i "$DISPLAY"                -c:v libx264 -preset ultrafast -crf 30 -y "$RECFILE" &
-        RECPID=$!; RECMODE=ffmpeg
-    elif command -v wf-recorder >/dev/null; then
-        RECFILE="$1.mkv"
-        wf-recorder -f "$RECFILE" >/dev/null 2>&1 &
-        RECPID=$!; RECMODE=wf
-    elif gdbus introspect --session --dest org.gnome.Shell.Screencast                --object-path /org/gnome/Shell/Screencast >/dev/null 2>&1; then
-        # The shell answers with the file it actually writes (it picks the
-        # container), so the real name comes from the reply. max-length 0
-        # lifts the 30 s default cap.
-        case "$1" in /*) RECFILE="$1.webm";; *) RECFILE="$(pwd)/$1.webm";; esac
-        RECFILE=$(gdbus call --session --dest org.gnome.Shell.Screencast --object-path /org/gnome/Shell/Screencast --method org.gnome.Shell.Screencast.Screencast "$RECFILE" "{'max-length': <uint32 0>}" 2>/dev/null | sed -n "s/^(true, '\(.*\)')$/\1/p")
-        [ -n "$RECFILE" ] || return 1
-        RECMODE=gnome
-    else
-        return 1
-    fi
-    sleep 1
-}
-
-stop_recorder () {
-    case "${RECMODE:-}" in
-        ffmpeg|wf) kill -TERM "$RECPID" 2>/dev/null; wait "$RECPID" 2>/dev/null;;
-        gnome) gdbus call --session --dest org.gnome.Shell.Screencast                      --object-path /org/gnome/Shell/Screencast                      --method org.gnome.Shell.Screencast.StopScreencast                      >/dev/null 2>&1;;
-    esac
-    RECMODE=""
+# Everything printed from here on goes to the screen and to the file $1: in
+# colour on the screen, and with the colours taken back out on the way into the
+# file, line by line, so a run cut short still leaves what it printed.
+tee_report () {
+    exec > >(tee >(sed -u 's/\x1b\[[0-9;]*m//g' > "$1")) 2>&1
 }
 
 # x11 or wayland. XDG_SESSION_TYPE lies less than it used to, but a live
@@ -444,49 +438,114 @@ session_type () {
     if [ -n "${WAYLAND_DISPLAY:-}" ]; then echo wayland; else echo x11; fi
 }
 
-# The window manager of this session. Sets WM_NAME (mutter, kwin, xfwm4, ...)
-# and WM_PID, the process whose CPU is the compositor's. The desktop decides
-# first; a process scan and the X11 WM name are fallbacks.
+# What the window manager managing this X11 screen says about itself: it owns
+# the window named by _NET_SUPPORTING_WM_CHECK, which carries its name and
+# sometimes its pid - compiz, among others, leaves _NET_WM_PID unset. Echoes
+# the pid on one line and the name on the next - two lines because a name has
+# spaces in it often enough ("GNOME Shell") and a missing pid leaves nothing.
+# Fails when nothing is managing the screen.
+x11_wm_check () {
+    local win name pid
+    win=$(xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null |
+          grep -oE '0x[0-9a-fA-F]+' | head -1)
+    [ -n "$win" ] || return 1
+    name=$(xprop -id "$win" _NET_WM_NAME 2>/dev/null |
+           sed -n 's/.*= "\(.*\)"$/\1/p')
+    [ -n "$name" ] || return 1
+    pid=$(xprop -id "$win" _NET_WM_PID 2>/dev/null | grep -oE '[0-9]+$')
+    printf '%s\n%s\n' "$pid" "$name"
+}
+
+# A published window manager name, or a process name, as the short name used
+# here and in the result file names, so no spaces and no capitals.
+wm_canon () {
+    local n=${1,,}
+
+    case "$n" in
+        *xfwm*)                 echo xfwm4;;
+        *compiz*)               echo compiz;;
+        *kwin*)                 echo kwin;;
+        *muffin*|*cinnamon*)    echo muffin;;
+        *mutter*|*gnome*shell*) echo mutter;;
+        *marco*)                echo marco;;
+        *metacity*)             echo metacity;;
+        *openbox*)              echo openbox;;
+        *labwc*)                echo labwc;;
+        # Anything else keeps its own name, minus what would break a file name
+        *)                      echo "${n//[^a-z0-9.]/_}";;
+    esac
+}
+
+# The window manager of this session. Sets WM_NAME (mutter, kwin, xfwm4, ...),
+# WM_PID, the process whose processor time is the compositor's, and WM_PIDS,
+# that process together with any helper of its own that draws.
+#
+# On X11 the running window manager is asked first, because it is the only
+# source that keeps up when one replaces another mid-session: after
+# compiz --replace the desktop still says XFCE, and going by that alone reports
+# a session as xfwm4 that has no xfwm4 in it. Wayland has nothing to ask, so
+# there the desktop names the candidates and only a name with a live process
+# behind it is taken.
 detect_wm () {
-    local desktop=${XDG_CURRENT_DESKTOP:-} st p
+    local desktop=${XDG_CURRENT_DESKTOP:-} st p cand="" dcand="" name="" pid=""
+    local helpers=""
     st=$(session_type)
-    WM_NAME=""; WM_PID=""
+    WM_NAME=""; WM_PID=""; WM_PIDS=""
+
+    if [ "$st" = x11 ]; then
+        { read -r pid; read -r name; } <<< "$(x11_wm_check)"
+        [ -n "$name" ] && WM_NAME=$(wm_canon "$name")
+        # A pid nothing can be read from is no pid: containers and some setups
+        # hide the process, and it is then worth looking for it by name below
+        [ -n "$pid" ] && [ -r "/proc/$pid/stat" ] && WM_PID=$pid
+    fi
 
     case "$desktop" in
-        *GNOME*)     WM_NAME=mutter
-                     WM_PID=$(pgrep -x mutter | head -1)
-                     [ -n "$WM_PID" ] || WM_PID=$(pgrep -x gnome-shell | head -1);;
-        *KDE*)       WM_NAME=kwin
-                     [ "$st" = wayland ] && WM_PID=$(pgrep -x kwin_wayland | head -1) \
-                                         || WM_PID=$(pgrep -x kwin_x11 | head -1);;
-        *X-Cinnamon*|*Cinnamon*)
-                     WM_NAME=muffin
-                     WM_PID=$(pgrep -x muffin | head -1)
-                     [ -n "$WM_PID" ] || WM_PID=$(pgrep -x cinnamon | head -1);;
-        *COSMIC*)    WM_NAME=cosmic-comp; WM_PID=$(pgrep -x cosmic-comp | head -1);;
-        *MATE*)      WM_NAME=marco;   WM_PID=$(pgrep -x marco | head -1);;
-        *LXQt*|*LXDE*)
-                     [ "$st" = wayland ] && { WM_NAME=labwc; WM_PID=$(pgrep -x labwc | head -1); } \
-                                         || { WM_NAME=openbox; WM_PID=$(pgrep -x openbox | head -1); };;
-        *XFCE*)      [ "$st" = wayland ] && { WM_NAME=labwc; WM_PID=$(pgrep -x labwc | head -1); } \
-                                         || { WM_NAME=xfwm4; WM_PID=$(pgrep -x xfwm4 | head -1); };;
+        *GNOME*)                 dcand="mutter gnome-shell";;
+        *KDE*)                   dcand="kwin_wayland kwin_x11";;
+        *X-Cinnamon*|*Cinnamon*) dcand="muffin cinnamon";;
+        *COSMIC*)                dcand="cosmic-comp";;
+        *MATE*)                  dcand="marco";;
+        *LXQt*|*LXDE*)           dcand="labwc openbox";;
+        *XFCE*)                  dcand="labwc xfwm4";;
     esac
+    # Whatever the desktop is, and whatever it failed to mention. The name from
+    # the screen goes first: that one is known to be the right answer, and all
+    # that is missing is its process.
+    cand="$WM_NAME $dcand xfwm4 compiz kwin_x11 kwin_wayland labwc openbox marco
+          metacity cosmic-comp mutter muffin gnome-shell cinnamon sway"
 
-    # No desktop said so: ask around
     if [ -z "$WM_PID" ]; then
-        for p in xfwm4 kwin_x11 kwin_wayland labwc openbox marco cosmic-comp \
-                 mutter muffin gnome-shell cinnamon sway; do
-            WM_PID=$(pgrep -x "$p" | head -1)
-            [ -n "$WM_PID" ] && { WM_NAME=$p; break; }
+        for p in $cand; do
+            # A name already settled is not up for changing, only for finding
+            [ -z "$WM_NAME" ] || [ "$(wm_canon "$p")" = "$WM_NAME" ] || continue
+            pid=$(pgrep -x "$p" | head -1)
+            [ -n "$pid" ] || continue
+            WM_NAME=$(wm_canon "$p"); WM_PID=$pid; break
         done
-        case "$WM_NAME" in gnome-shell) WM_NAME=mutter;;
-                           cinnamon) WM_NAME=muffin;; esac
     fi
-    if [ -z "$WM_NAME" ] && [ "$st" = x11 ]; then
-        WM_NAME=$(xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null |
-                  awk '{print $NF}' | xargs -r -I{} xprop -id {} _NET_WM_NAME 2>/dev/null |
-                  sed 's/.*= "//; s/".*//')
+
+    # Nothing published and no process to be seen, which is the container case
+    # on Wayland: the desktop's own compositor is the most that can be said,
+    # and it is worth saying rather than refusing to run at all.
+    [ -z "$WM_NAME" ] && [ -n "$dcand" ] && WM_NAME=$(wm_canon "${dcand%% *}")
+
+    # Compositing can cost more than the window manager's own process: compiz
+    # paints its frames in a separate program, and a window manager that does
+    # not composite at all is usually paired with one that does nothing else.
+    # Those helpers are what compositing costs here, so they are counted too.
+    # The names are what /proc shows, cut to 15 characters.
+    WM_PIDS=$WM_PID
+    case "$WM_NAME" in
+        compiz)   helpers='gtk-window-deco|emerald';;
+        openbox|metacity|marco|xfwm4|i3|awesome|fluxbox|icewm)
+                  helpers='picom|compton|xcompmgr';;
+        *)        helpers="";;
+    esac
+    if [ -n "$helpers" ] && [ -n "$WM_PID" ]; then
+        WM_PIDS="$WM_PID $(pgrep -x "$helpers" | tr '\n' ' ')"
     fi
+
     [ -n "$WM_NAME" ]
 }
 
@@ -507,4 +566,57 @@ pick_capture_cmd () {
     fi
 
     return 1
+}
+
+# The stress mix, defined once because both scripts have to mean the same load
+# by it: benchmark.sh measures it, validate.sh watches it for artifacts.
+#
+# Every load is given the same amount of work at its own fixed rate, so on a
+# machine that keeps up they all finish together, and on one that does not they
+# fall behind together. Each is held at the gate until the whole mix is on
+# screen, so no task at all is done before the load is up. See gate.c.
+STRESS_FRAMES=${RENDER_FRAMES:-1200}    # 20 s of frames at 60 a second
+
+# Bottom first: the last name ends up on top. Order fixed so that the same
+# windows are covered, and so the same amount of work is composited, every run.
+STRESS_STACK=("fsbench" "popbench background" "transbench background"
+              "manywin" "movebench resize" "movebench" "transbench translucent")
+
+# Start the whole mix held at gate $1, logs named "$2-<load>.log". Fills
+# STRESS_NAMES, STRESS_LOGS and STRESS_PIDS, in step with each other.
+stress_start () {
+    STRESS_GATE=$1; STRESS_PRE=$2
+    STRESS_NAMES=(); STRESS_LOGS=(); STRESS_PIDS=()
+    local r=$STRESS_FRAMES
+
+    stress_load move   $((2 * r))       ./tools/movebench 0 move 120
+    stress_load popups $(((r + 2) / 3)) ./tools/popbench 0 20 4
+    stress_load trans  "$r"             ./tools/transbench 0 0.75 60
+    stress_load resize $((2 * r))       ./tools/movebench 0 resize 120
+    stress_load render "$r"             ./tools/fsbench2 0 windowed 60
+}
+
+stress_load () {                # $1 name, $2 tasks, $3... the program
+    local name=$1 tasks=$2 log="$STRESS_PRE-$1.log"
+    shift 2
+    : > "$log"
+    BENCH_GO="$STRESS_GATE" BENCH_TASKS=$tasks "$@" >> "$log" 2>&1 &
+    STRESS_NAMES+=("$name"); STRESS_LOGS+=("$log"); STRESS_PIDS+=("$!")
+}
+
+# Wait until every load is set up and waiting at the gate. A program still
+# drawing its content when the gate opens is not held by it: it would start as
+# late as its setup took and stagger the whole mix by that much.
+stress_wait_ready () {
+    local i left=1
+
+    while [ "$left" = 1 ]; do
+        left=0
+        for i in "${!STRESS_LOGS[@]}"; do
+            grep -q MEASURE-READY "${STRESS_LOGS[$i]}" 2>/dev/null && continue
+            kill -0 "${STRESS_PIDS[$i]}" 2>/dev/null || continue
+            left=1
+        done
+        [ "$left" = 1 ] && sleep 0.1
+    done
 }
