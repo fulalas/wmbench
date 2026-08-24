@@ -24,6 +24,22 @@ The exception is the frame rate, which is deliberately flat out and reports
 only frames a second. It runs three times: windowed, fullscreen, and
 fullscreen asking compositing to step aside with `_NET_WM_BYPASS_COMPOSITOR`.
 
+No workload repeats work another one does: the scripted person is split into
+`windows` (maximize, minimize, snap, raise, fullscreen) and `scroll`, next to
+the `resize` and `dnd` rows.
+
+Every load says where its windows actually landed, and the rows built out of
+moving windows check that the windows really moved. Where a compositor
+refuses - cosmic-comp will not reposition an X11 window it manages - the row
+is left empty and named at the end rather than filled with the small number a
+compositor doing nothing produces.
+
+The CPU column is the window manager's own process. On X11 part of the
+compositing happens inside the X server and is not in it - but the server also
+does every program's drawing, which on Wayland happens inside the programs
+themselves, so adding it would tilt the comparison the other way rather than
+fix it. Read X11 numbers against X11 ones.
+
 ## validate.sh
 
 Nine tests, each hunting one visual defect. `validate.sh` runs them all, then
@@ -58,7 +74,9 @@ On Wayland a screenshot tool is required (`grim`, `gnome-screenshot` or
 
 The stability pass at the end runs everything at once, all of it started and
 finished together, with `motion_check`'s pattern scrolling in the middle of it:
-the same question asked of a compositor that is busy.
+the same question asked of a compositor that is busy. The windows are opened
+one at a time, each waited for before the next, so they stack in the order they
+were opened and every session composites the same scene.
 
 ## The power metric
 

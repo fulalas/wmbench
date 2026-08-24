@@ -23,6 +23,7 @@
 
 #include "gate.h"
 #include "now.h"
+#include "place.h"
 
 #define WINW 1600
 #define WINH 1000
@@ -130,6 +131,7 @@ int main (int argc, char **argv)
     gc = XCreateGC (d, win, 0, NULL);
     XSync (d, False);
     sleep (3);
+    bench_placed (d, win, 120, 120, "argbbench");
 
     tasks = bench_tasks ();
     warm = (tasks > 0) ? 10 : 0;

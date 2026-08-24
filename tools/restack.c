@@ -129,9 +129,106 @@ static int have_window (Window w, const char *name, int depth)
     return found;
 }
 
+/* Does this window, or one under it, carry this name? */
+static int matches (Window w, const char *name, int depth)
+{
+    Window r, parent, *kids = NULL;
+    unsigned int n, i;
+    char *wname = NULL;
+    int found = 0;
+
+    if (depth > 4)
+    {
+        return 0;
+    }
+    if (XFetchName (d, w, &wname) && wname != NULL)
+    {
+        found = (strcmp (wname, name) == 0);
+        XFree (wname);
+    }
+    if (found)
+    {
+        return 1;
+    }
+    if (XQueryTree (d, w, &r, &parent, &kids, &n))
+    {
+        for (i = 0; i < n && !found; i++)
+        {
+            found = matches (kids[i], name, depth + 1);
+        }
+        if (kids != NULL)
+        {
+            XFree (kids);
+        }
+    }
+
+    return found;
+}
+
+/*
+ * Is the stack the order that was asked for? Only the named windows are
+ * looked at, from the bottom up; anything else on the desktop sits wherever
+ * it likes. A name may appear more than once - the many-window filler - so a
+ * repeat of the name just seen is not out of order.
+ */
+static int stack_wrong (int argc, char **argv, int first, int say)
+{
+    Window r, parent, *kids = NULL;
+    unsigned int n, k;
+    int want = first, last = -1, bad = 0, i;
+
+    XSync (d, False);
+    if (!XQueryTree (d, root, &r, &parent, &kids, &n))
+    {
+        return 0;
+    }
+    for (k = 0; k < n; k++)
+    {
+        Window kid = kids[k];   /* XQueryTree lists the bottom-most first */
+
+        for (i = first; i < argc; i++)
+        {
+            if (matches (kid, argv[i], 0))
+            {
+                break;
+            }
+        }
+        if (i == argc || i == last)
+        {
+            continue;           /* not ours, or another of the same name */
+        }
+        if (i != want)
+        {
+            bad = 1;
+            if (say)
+            {
+                printf ("stack: expected \"%s\" here, found \"%s\"\n",
+                        (want < argc) ? argv[want] : "nothing", argv[i]);
+            }
+        }
+        last = i;
+        want = i + 1;
+    }
+    if (kids != NULL)
+    {
+        XFree (kids);
+    }
+    if (want < argc)
+    {
+        bad = 1;
+        if (say)
+        {
+            printf ("stack: never saw \"%s\"\n", argv[want]);
+        }
+    }
+
+    return bad;
+}
+
 int main (int argc, char **argv)
 {
-    int i, total = 0, first = 1, wait_first = 0;
+    int i, total = 0, first = 1, wait_first = 0, wait_only = 0,
+        check_only = 0, never = 0;
 
     d = XOpenDisplay (NULL);
     if (d == NULL)
@@ -154,6 +251,25 @@ int main (int argc, char **argv)
         wait_first = 1;
         first = 2;
     }
+    /*
+     * -wait: wait for these windows and stop there, raising nothing. The
+     * stress mix opens its windows one at a time, each one waited for before
+     * the next is started, so they stack in the order they were opened - the
+     * way a person's desktop stacks. Nothing then has to be restacked, and
+     * nothing depends on a window manager granting a raise.
+     */
+    if (argc > 1 && strcmp (argv[1], "-wait") == 0)
+    {
+        wait_first = 1;
+        wait_only = 1;
+        first = 2;
+    }
+    /* -c: say whether the order is the one named, and change nothing */
+    if (argc > 1 && strcmp (argv[1], "-c") == 0)
+    {
+        check_only = 1;
+        first = 2;
+    }
 
     if (wait_first)
     {
@@ -172,24 +288,66 @@ int main (int argc, char **argv)
             if (waited >= 300)
             {
                 printf ("restack: waited in vain for \"%s\"\n", argv[i]);
+                never = 1;
             }
         }
     }
 
-    for (i = first; i < argc; i++)
+    if (wait_only)
     {
-        int n = raise_matching (root, argv[i], 0);
-
-        if (n == 0)
-        {
-            printf ("restack: nothing named \"%s\"\n", argv[i]);
-        }
-        total += n;
-        XSync (d, False);
-        usleep (40000);
+        XCloseDisplay (d);
+        /*
+         * A window that never came is not a stacking question - it is a load
+         * that did not start - and saying so here is the difference between a
+         * mix with a hole in it and a mix nobody knew had one.
+         */
+        return never ? 3 : 0;
     }
-    printf ("restack: %d windows placed\n", total);
-    XCloseDisplay (d);
 
-    return 0;
+    /*
+     * Twice if need be. The raise is a request, and a window manager with six
+     * programs putting windows up at once answers it when it gets to it: a
+     * stack read straight after the last request is often still settling, and
+     * calling that a refusal would throw away a row that was perfectly good.
+     */
+    if (!check_only)
+    {
+        int pass;
+
+        for (pass = 0; pass < 2; pass++)
+        {
+            total = 0;
+            for (i = first; i < argc; i++)
+            {
+                int n = raise_matching (root, argv[i], 0);
+
+                if (n == 0 && pass == 0)
+                {
+                    printf ("restack: nothing named \"%s\"\n", argv[i]);
+                }
+                total += n;
+                XSync (d, False);
+                usleep (40000);
+            }
+            usleep (500000);    /* let it settle before believing it */
+            if (!stack_wrong (argc, argv, first, 0))
+            {
+                break;
+            }
+        }
+    }
+    if (!check_only)
+    {
+        printf ("restack: %d windows placed\n", total);
+    }
+
+    {
+        int bad = stack_wrong (argc, argv, first, 1);
+
+        printf ("stack: %s\n", bad ? "NOT AS ASKED" : "as asked");
+        fflush (stdout);
+        XCloseDisplay (d);
+
+        return bad ? 3 : 0;
+    }
 }

@@ -142,9 +142,8 @@ echo "== stability"
 # this is the same load benchmark.sh measures. manywin is scenery: it counts
 # nothing, and is held until killed rather than going away part way through.
 GO="$PWD/va-stress.go"; rm -f "$GO"
-./tools/manywin 12 > va-many.log 2>&1 &
-M=$!
 stress_start "$GO" va
+M=$STRESS_SCENERY_PID
 
 # The same question motion_check asks on an idle screen, asked of a compositor
 # that is busy: a known pattern scrolling in a window kept on top, every capture
@@ -161,11 +160,18 @@ if [ "$PIXELS" = 1 ]; then
 fi
 
 stress_wait_ready
-# Bottom first, so the pattern being watched is named last: covered, it would be
+# The windows went up one at a time, in order, so the stack is already the
+# named one. The pattern being watched is the exception: it is started after
+# the others and has to be on top, or it would be photographing somebody
+# else's window.
+STACK_OK=1
+stress_settle || STACK_OK=0
+[ "${STRESS_LATE:-0}" = 1 ] && STACK_OK=0
+# The pattern being watched goes last of all: covered, it would be
 # photographing somebody else's window
-RS=("${STRESS_STACK[@]}")
-[ -n "$LP" ] && RS+=("motion_check")
-./tools/restack -w "${RS[@]}" >/dev/null
+if [ -n "$LP" ]; then
+    ./tools/restack -w "motion_check" >> va-restack.log 2>&1
+fi
 : > "$GO"
 
 # The work in there is 20 s long. A load still going long after that is the
@@ -197,6 +203,18 @@ if [ "$ST" = x11 ]; then
 fi
 printf '  %-16s ' survived
 [ "${#FAILURES[@]}" = "$WAS" ] && green passed || red failed
+# The scene the load was watched in has to be the same scene everywhere, or
+# what the checks above saw is not what another session's checks saw.
+[ "$STACK_OK" = 0 ] &&
+    echo "  the windows did not stack in the named order, so this load was" &&
+    echo "  a different scene from the one other sessions run"
+# A stack nobody would take means the load ran, but not the load that was
+# designed. Said here so the verdict is not read as covering it.
+for l in "${STRESS_LOGS[@]}"; do
+    grep -q MOVE-NEVER-HAPPENED "$l" 2>/dev/null &&
+        echo "  the compositor would not move a window it manages, so the" &&
+        echo "  load above was a different scene from other sessions'" && break
+done
 
 # The pattern that was scrolling in the middle of all that
 if [ -n "$LP" ]; then

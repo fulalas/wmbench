@@ -24,6 +24,7 @@
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
 #include "stage.h"
+#include "place.h"
 
 #define WINW 420
 #define WINH 320
@@ -101,6 +102,7 @@ int main (int argc, char **argv)
     }
     XSync (d, False);
     sleep (3);
+    bench_placed (d, wins[0], sx, sy, "manywin");
 
     gc = XCreateGC (d, wins[0], 0, NULL);
     for (i = 0; i < count; i++)

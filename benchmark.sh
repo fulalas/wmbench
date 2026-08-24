@@ -4,7 +4,7 @@
 # Run it in each desktop session you want to compare, and put the tables
 # side by side.
 set -u
-ALL="idle usage move resize dnd popups video argb render fullscreen uncapped stress"
+ALL="idle move resize dnd popups video argb windows scroll render fullscreen uncapped stress"
 
 usage_help () {
     cat <<EOF
@@ -22,8 +22,10 @@ tests:
             does, at 60 a second
   argb      2400 redraws of a transparent window that declares an opaque
             region, which is what every GTK window is, at 120 a second
-  usage     a scripted person: maximize, minimize, snap to sides and
-            corners, scroll, resize, drag and drop, raise, fullscreen
+  windows   maximize, minimize, snap to the sides and corners, raise
+            two windows over each other, fullscreen and back
+  scroll    a text document scrolled by the chevrons, then by dragging
+            the thumb the whole way and back
   render    1200 frames of a GL window held to 60 fps
   fullscreen  the same frames in a fullscreen window, twice: as it comes, and
             asking compositing to step aside with _NET_WM_BYPASS_COMPOSITOR
@@ -41,6 +43,11 @@ that takes, so power and CPU time compare directly; the time it took is
 a result, not a setting. The one exception is uncapped, which is deliberately
 flat out and reports only frames a second.
 
+A row whose work the desktop refuses - a compositor that will not move a
+window it manages, for one - is left empty and named at the end. An empty
+row says nothing; a small number for a window that never moved reads as the
+best result in the table.
+
 The result is printed and saved under results/.
 EOF
 }
@@ -48,7 +55,7 @@ case "${1:-}" in -h|--help) usage_help; exit 0;; esac
 
 TESTS=${*:-$ALL}
 for t in $TESTS; do
-    case "$t" in idle|usage|move|resize|dnd|popups|video|argb|render|fullscreen|uncapped|stress) ;;
+    case "$t" in idle|move|resize|dnd|popups|video|argb|windows|scroll|render|fullscreen|uncapped|stress) ;;
         *) echo "unknown test: $t"; echo; usage_help; exit 1;;
     esac
 done
@@ -64,7 +71,8 @@ ARGB_STEPS=${ARGB_STEPS:-2400}
 RENDER_FRAMES=${RENDER_FRAMES:-1200}
 RESIZE_CYCLES=${RESIZE_CYCLES:-2}
 DND_PASSES=${DND_PASSES:-1}
-USAGE_PASSES=${USAGE_PASSES:-1}
+WINDOWS_PASSES=${WINDOWS_PASSES:-1}
+SCROLL_PASSES=${SCROLL_PASSES:-1}
 UNCAP_SECONDS=${UNCAP_SECONDS:-16}      # the one row that is timed, by design
 
 
@@ -131,7 +139,8 @@ EST=0
 for t in $TESTS; do
     case "$t" in
         idle)     EST=$((EST + IDLE_WINDOW + 4));;
-        usage)    EST=$((EST + 70));;
+        windows)  EST=$((EST + WINDOWS_PASSES * 15 + 10));;
+        scroll)   EST=$((EST + SCROLL_PASSES * 12 + 10));;
         move)     EST=$((EST + MOVE_STEPS / 120 + 10));;
         resize)   EST=$((EST + RESIZE_CYCLES * 18 + 10));;
         dnd)      EST=$((EST + DND_PASSES * 20 + 10));;
@@ -148,6 +157,16 @@ echo "running tests — do not use the computer (~$(( (EST + 59) / 60 )) min)"
 
 now_s () { date +%s.%N; }
 
+# What compositing costs this session: the window manager's own process, and
+# nothing else. The X server is deliberately left out on X11. It does part of
+# the compositing, but it also does every client's drawing - the loads here
+# push their pixels through it - and on Wayland that same drawing happens
+# inside each program and is not counted anywhere. Adding the server would not
+# make the two session types comparable; it would tilt X11 the other way.
+comp_cpu () {
+    wm_cpu
+}
+
 # CPU seconds between two wm_cpu readings, or "-" when either reading is
 # missing (no visible process) or the counter went backwards (the process was
 # replaced while we watched)
@@ -161,11 +180,11 @@ cpu_delta () {                  # $1 before, $2 after
 idle_window () {
     local c0 c1 w end=$((SECONDS + $1))
 
-    c0=$(wm_cpu); power_begin
+    c0=$(comp_cpu); power_begin
     while [ $SECONDS -lt $end ]; do
         power_sample; sleep 0.1
     done
-    c1=$(wm_cpu); w=$(power_end)
+    c1=$(comp_cpu); w=$(power_end)
     awk -v w="$w" -v c="$(cpu_delta "$c0" "$c1")" -v t="$1" \
         'BEGIN{printf "%s %s %.1f", w, c, t}'
 }
@@ -186,21 +205,46 @@ measure () {                    # $1 row name, $2 task count, $3... the load
         kill -0 "$pid" 2>/dev/null || { wait "$pid"; return 1; }
         sleep 0.1
     done
-    t0=$(now_s); c0=$(wm_cpu); power_begin
+    t0=$(now_s); c0=$(comp_cpu); power_begin
     while ! grep -q MEASURE-END "$log" 2>/dev/null; do
         kill -0 "$pid" 2>/dev/null || break
         power_sample
         sleep 0.1
     done
-    t1=$(now_s); c1=$(wm_cpu); w=$(power_end)
-    wait "$pid" || return 1
+    t1=$(now_s); c1=$(comp_cpu); w=$(power_end)
+    wait "$pid"; rc=$?
+    # 3 is the load saying the desktop refused to do the thing being measured.
+    # It ran and it finished; there is simply nothing here worth a number.
+    [ "$rc" = 3 ] && return 3
+    [ "$rc" = 0 ] || return 1
     grep -q MEASURE-END "$log" || return 1
 
     awk -v w="$w" -v c="$(cpu_delta "$c0" "$c1")" -v t0="$t0" -v t1="$t1" \
         'BEGIN{printf "%s %s %.1f", w, c, t1 - t0}'
 }
 
-IDLE=""; USAGE=""; MOVE=""; RESIZE=""; DND=""; POP=""; RENDER=""; UNCAP=""
+# A row the desktop would not perform. Named, so the table says why it is
+# empty instead of leaving a gap, and left out of the totals.
+REFUSED=()
+ROW_OUT=""
+run_row () {                    # $1 label, $2 row name, $3 tasks, $4... load
+    local label=$1 name=$2 rc
+    shift
+    running "$label"
+    ROW_OUT=$(measure "$@"); rc=$?
+    case $rc in
+        0) tally "$label" "$ROW_OUT";;
+        3) done_running; ROW_OUT=""
+           REFUSED+=("$label")
+           # In the data block too, so the comparison keeps the row and shows
+           # it empty instead of dropping it as if it had never been asked for
+           DATA+=("- - - $label")
+           printf '%-17s%14s%16s%14s\n' "$label" "-" "-" "not done";;
+        *) done_running; ROW_OUT=""; LOADFAIL="$LOADFAIL $name";;
+    esac
+}
+
+IDLE=""; WINDOWS=""; SCROLL=""; MOVE=""; RESIZE=""; DND=""; POP=""; RENDER=""; UNCAP=""
 VIDEO=""; ARGB=""
 FPS=""; FS=""; FS_ASK=""; STRESS=""; LOADFAIL=""
 
@@ -254,52 +298,40 @@ printf '%-17s%14s%16s%14s\n' workload power "compositor CPU" "time elapsed"
 want idle && running "idle" && IDLE=$(idle_window "$IDLE_WINDOW") && print_row "idle" "$IDLE"
 
 if want move; then
-    running "move"
-    MOVE=$(measure move "$MOVE_STEPS" ./tools/movebench 0 move 120) ||
-        LOADFAIL="$LOADFAIL move"
-    tally "move" "$MOVE"
+    run_row "move" move "$MOVE_STEPS" ./tools/movebench 0 move 120
+    MOVE=$ROW_OUT
 fi
 if want resize; then
-    running "resize"
-    RESIZE=$(measure resize "$RESIZE_CYCLES" ./tools/usagebench 0 3 resize) ||
-        LOADFAIL="$LOADFAIL resize"
-    tally "resize" "$RESIZE"
+    run_row "resize" resize "$RESIZE_CYCLES" ./tools/usagebench 0 3 resize
+    RESIZE=$ROW_OUT
 fi
 if want dnd; then
-    running "drag and drop"
-    DND=$(measure dnd "$DND_PASSES" ./tools/usagebench 0 3 dnd) ||
-        LOADFAIL="$LOADFAIL dnd"
-    tally "drag and drop" "$DND"
+    run_row "drag and drop" dnd "$DND_PASSES" ./tools/usagebench 0 3 dnd
+    DND=$ROW_OUT
 fi
 if want popups; then
-    running "popups"
-    POP=$(measure popups "$POP_CYCLES" ./tools/popbench 0 20 6) ||
-        LOADFAIL="$LOADFAIL popups"
-    tally "popups" "$POP"
+    run_row "popups" popups "$POP_CYCLES" ./tools/popbench 0 20 6
+    POP=$ROW_OUT
 fi
 if want video; then
-    running "video"
-    VIDEO=$(measure video "$VIDEO_FRAMES" ./tools/videobench 0 60) ||
-        LOADFAIL="$LOADFAIL video"
-    tally "video" "$VIDEO"
+    run_row "video" video "$VIDEO_FRAMES" ./tools/videobench 0 60
+    VIDEO=$ROW_OUT
 fi
 if want argb; then
-    running "transparent window"
-    ARGB=$(measure argb "$ARGB_STEPS" ./tools/argbbench 0 120) ||
-        LOADFAIL="$LOADFAIL argb"
-    tally "transparent window" "$ARGB"
+    run_row "transparent window" argb "$ARGB_STEPS" ./tools/argbbench 0 120
+    ARGB=$ROW_OUT
 fi
-if want usage; then
-    running "usage"
-    USAGE=$(measure usage "$USAGE_PASSES" ./tools/usagebench 0 3) ||
-        LOADFAIL="$LOADFAIL usage"
-    tally "usage" "$USAGE"
+if want windows; then
+    run_row "windows" windows "$WINDOWS_PASSES" ./tools/usagebench 0 3 windows
+    WINDOWS=$ROW_OUT
+fi
+if want scroll; then
+    run_row "scroll" scroll "$SCROLL_PASSES" ./tools/usagebench 0 3 scroll
+    SCROLL=$ROW_OUT
 fi
 if want render; then
-    running "render 60 fps"
-    RENDER=$(measure render "$RENDER_FRAMES" ./tools/fsbench2 0 windowed 60) ||
-        LOADFAIL="$LOADFAIL render"
-    tally "render 60 fps" "$RENDER"
+    run_row "render 60 fps" render "$RENDER_FRAMES" ./tools/fsbench2 0 windowed 60
+    RENDER=$ROW_OUT
 fi
 
 # The pair that says what leaving a window out of compositing is worth. The
@@ -308,16 +340,12 @@ fi
 # disappears into the noise. A fullscreen window is also created already
 # covering the monitor, because that is when a window manager decides.
 if want fullscreen; then
-    running "fullscreen"
-    FS=$(measure fullscreen "$RENDER_FRAMES" \
-         env BENCH_LIGHT=1 ./tools/fsbench2 0 fullscreen 60) ||
-        LOADFAIL="$LOADFAIL fullscreen"
-    tally "fullscreen" "$FS"
-    running "fullscreen asked"
-    FS_ASK=$(measure fullscreen-asked "$RENDER_FRAMES" \
-             env BENCH_LIGHT=1 BENCH_BYPASS=1 ./tools/fsbench2 0 fullscreen 60) ||
-        LOADFAIL="$LOADFAIL fullscreen-asked"
-    tally "fullscreen asked" "$FS_ASK"
+    run_row "fullscreen" fullscreen "$RENDER_FRAMES" \
+        env BENCH_LIGHT=1 ./tools/fsbench2 0 fullscreen 60
+    FS=$ROW_OUT
+    run_row "fullscreen asked" fullscreen-asked "$RENDER_FRAMES" \
+        env BENCH_LIGHT=1 BENCH_BYPASS=1 ./tools/fsbench2 0 fullscreen 60
+    FS_ASK=$ROW_OUT
 fi
 
 # Last on purpose: everything at once heats the chip and would warm up
@@ -332,22 +360,24 @@ if want stress; then
     # screen: it is scenery, it counts nothing, and it is killed at the end
     # rather than ending anything.
     GO="$PWD/bm-stress.go"; rm -f "$GO"
-    ./tools/manywin 12 > bm-many.log 2>&1 &
-    MANY=$!
-    # The mix itself, the work each load does and the order they are stacked in
-    # all live in lib/common.sh, so validate.sh means the same load by it
+    # The mix itself, the work each load does and the order the windows are
+    # opened in all live in lib/common.sh, so validate.sh means the same load
+    # by it. They go up one at a time, in that order, so the stack is the
+    # order they were opened and nothing has to be rearranged afterwards.
     stress_start "$GO" bm-s
+    MANY=$STRESS_SCENERY_PID
     SL=("${STRESS_LOGS[@]}"); SP=("${STRESS_PIDS[@]}"); SEND=()
     stress_wait_ready
 
-    # Everything is on screen now, so the stack can be put in a named order
-    ./tools/restack -w "${STRESS_STACK[@]}" >/dev/null
+    STACK_OK=1
+    stress_settle || STACK_OK=0
+    [ "${STRESS_LATE:-0}" = 1 ] && STACK_OK=0
     : > "$GO"
 
     for l in "${SL[@]}"; do
         while ! grep -q MEASURE-START "$l" 2>/dev/null; do sleep 0.1; done
     done
-    T0=$(now_s); C0=$(wm_cpu); power_begin
+    T0=$(now_s); C0=$(comp_cpu); power_begin
     OK=1; LEFT=${#SL[@]}
     while [ "$LEFT" -gt 0 ]; do
         power_sample
@@ -365,7 +395,7 @@ if want stress; then
             fi
         done
     done
-    T1=$(now_s); C1=$(wm_cpu)
+    T1=$(now_s); C1=$(comp_cpu)
     for p in "${SP[@]}" $MANY; do kill "$p" 2>/dev/null; done
     for p in "${SP[@]}" $MANY; do wait "$p" 2>/dev/null; done
     rm -f "$GO"
@@ -384,6 +414,20 @@ if want stress; then
                      'BEGIN{printf "%s %s %.1f", w, c, t1 - t0}')
     else
         LOADFAIL="$LOADFAIL stress"
+    fi
+    # A load in the mix whose window never moved leaves the whole scene
+    # different from every other session's, and there is nothing here worth a
+    # number. A stack order that would not take is only worth saying.
+    MIX_OK=$STACK_OK
+    for l in "${SL[@]}"; do
+        grep -q MOVE-NEVER-HAPPENED "$l" 2>/dev/null && MIX_OK=0
+    done
+    if [ "$MIX_OK" = 0 ] && [ -n "$STRESS" ]; then
+        done_running
+        REFUSED+=("stress")
+        DATA+=("- - - stress")
+        printf '%-17s%14s%16s%14s\n' stress "-" "-" "not done"
+        STRESS=""
     fi
     tally "stress" "$STRESS"
     [ -n "$STRESS" ] && [ -n "$STRESS_THIN" ] &&
@@ -415,7 +459,16 @@ if want uncapped; then
     [ -n "$FPS" ] || LOADFAIL="$LOADFAIL uncapped"
 fi
 
-if [ "$TROWS" -gt 0 ] && [ -z "$LOADFAIL" ]; then
+# A total over fewer rows is a smaller total. Printing one for a session that
+# would not perform some of the work would hand it the win in every column it
+# skipped - the same mistake as printing a small number for a window that
+# never moved, one level up.
+if [ "$TROWS" -gt 0 ] && [ -z "$LOADFAIL" ] && [ "${#REFUSED[@]}" != 0 ]; then
+    echo "$RULE"
+    echo "no total: this desktop did not do ${#REFUSED[@]} of the rows, and a"
+    echo "total over the rest would undercut every session that did them all"
+fi
+if [ "$TROWS" -gt 0 ] && [ -z "$LOADFAIL" ] && [ "${#REFUSED[@]}" = 0 ]; then
     echo "$RULE"
     if [ "$TPOWER" = 1 ]; then
         TW=$(awk -v e="$TENERGY" -v t="$TTIME" \
@@ -441,9 +494,9 @@ fi
 
 # Only where there is a battery to spend
 BAT=$(cat /sys/class/power_supply/BAT*/energy_full 2>/dev/null | head -1)
-if [ "$POWER_OK" = 1 ] && [ -n "$BAT" ] && [ -n "$IDLE" ] && [ -n "$USAGE" ]; then
+if [ "$POWER_OK" = 1 ] && [ -n "$BAT" ] && [ -n "$IDLE" ] && [ -n "$WINDOWS" ]; then
     read -r iw ic it <<< "$IDLE"
-    read -r uw uc ut <<< "$USAGE"
+    read -r uw uc ut <<< "$WINDOWS"
     awk -v i="$iw" -v u="$uw" -v uwh="$BAT" 'BEGIN{
         printf "battery: %s W idle to %s W in constant use - about %.1f h to",
                i, u, uwh / 1e6 / i;
@@ -454,13 +507,40 @@ fi
 if [ "$TROWS" -gt 0 ] && [ -z "$LOADFAIL" ] && [ "$ST" = x11 ]; then
     echo
     echo "On X11 part of the compositing happens inside the X server, whose"
-    echo "CPU time is not measured here."
+    echo "CPU time is not counted here: the server also does every program's"
+    echo "drawing, which on Wayland happens inside the programs themselves."
+    echo "Neither column holds all of it, so read X11 against X11."
+fi
+
+# Where a load did not get the place it asked for. It is not a failure - a
+# window somewhere else costs about the same to composite - but it means this
+# session laid the scene out differently from one that honoured the request,
+# and that belongs in the report rather than in a log about to be deleted.
+IGNORED=$(grep -h '^PLACE-IGNORED ' bm-*.log 2>/dev/null |
+          sed 's/^PLACE-IGNORED //' | sort -u)
+if [ -n "$IGNORED" ]; then
+    echo
+    echo "this desktop placed these windows itself, not where they asked:"
+    echo "$IGNORED" | sed 's/^/  /'
+fi
+
+# The rows this desktop would not perform, said once, plainly. A reader who
+# sees "-" in the table needs to know it is a refusal and not a broken sensor.
+if [ "${#REFUSED[@]}" != 0 ]; then
+    echo
+    echo "not done by this desktop, so left out of the total:"
+    for r in "${REFUSED[@]}"; do
+        echo "  $r"
+    done
+    echo "The compositor would not do what these rows are about, so they are"
+    echo "empty rather than filled with a number for something else. Their"
+    echo "logs are kept as bm-*.log."
 fi
 
 if [ -n "$LOADFAIL" ]; then
     red "FAILED to run:$LOADFAIL - the rows are missing above; their logs"
     red "are kept as bm-*.log"
-else
+elif [ "${#REFUSED[@]}" = 0 ]; then
     rm -f bm-*.log
 fi
 

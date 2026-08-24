@@ -28,6 +28,7 @@
 #include "gate.h"
 #include "now.h"
 #include "stage.h"
+#include "place.h"
 
 #define MIN(a,b) (((a) < (b)) ? (a) : (b))
 
@@ -119,6 +120,16 @@ int main (int argc, char **argv)
     gc = XCreateGC (d, bg, 0, NULL);
     XSync (d, False);
     sleep (3);
+
+    /*
+     * Where the window really is, not where it was asked to be. The popups
+     * below are override redirect, so they land exactly where they are put:
+     * placed from the asked-for corner they open away from the window on any
+     * compositor that does its own placing, and then the thing being measured
+     * is the desktop being redrawn under a menu instead of this window.
+     */
+    bench_placed (d, bg, bgx, bgy, "popbench background");
+    bench_where (d, bg, &bgx, &bgy, NULL, NULL);
 
     for (i = 0; i < 300; i++)
     {

@@ -150,6 +150,24 @@ END {
 
     print "== notes";
 
+    # A column missing a row it would not perform cannot be ranked against
+    # one that did everything: its total is a total over less work. Say so
+    # instead of handing it a win it did not earn.
+    partial = 0;
+    for (i = 1; i <= nrows; i++)
+    {
+        if (rows[i] == "total") continue;
+        for (j = 1; j <= nkeys; j++)
+            if (!pwn[order[j], rows[i]] && !cpun[order[j], rows[i]])
+            {
+                printf "* %s did not do \"%s\", so its total is over less work\n",
+                       order[j], rows[i];
+                partial = 1;
+            }
+    }
+    if (partial)
+        print "* the totals below are NOT a ranking: they cover different work";
+
     # Who won what, first: it is what the tables are read for
     bw = 1e9; bwk = ""; bc = 1e9; bck = ""; bf = 0; bfk = "";
     for (j = 1; j <= nkeys; j++)
@@ -162,8 +180,11 @@ END {
     }
     # Nothing wins a column that nobody could measure
     if (bfk != "") printf "* fastest: %s, %.1f fps\n", bfk, bf;
-    if (bwk != "") printf "* more efficient: %s, %.2f W\n", bwk, bw;
-    if (bck != "") printf "* least CPU time: %s, %.2f s\n", bck, bc;
+    if (!partial)
+    {
+        if (bwk != "") printf "* more efficient: %s, %.2f W\n", bwk, bw;
+        if (bck != "") printf "* least CPU time: %s, %.2f s\n", bck, bc;
+    }
 
     # Only what changes a reading of the tables. Long notes do not get read.
     for (j = 1; j <= nkeys; j++)
@@ -182,7 +203,11 @@ END {
     if (same) printf "* same display everywhere: %s\n", first;
     else
     {
-        print "* CAREFUL, not the same display:";
+        # A different refresh rate or scale is not a detail: at 120 Hz the
+        # compositor repaints twice as often as at 60, so each column above
+        # is answering a different question.
+        print "* THESE COLUMNS ARE NOT COMPARABLE: the display was not the";
+        print "  same in every run. Put the sessions on one mode and re-run.";
         for (j = 1; j <= nkeys; j++)
             printf "    %-14s %s\n", order[j], disp[order[j]];
     }
@@ -200,6 +225,6 @@ END {
     for (j = 1; j <= nkeys; j++)
         if (isx11[order[j]]) x = x (x == "" ? "" : ", ") order[j];
     if (x != "")
-        printf "* on X11 the CPU column doesn'\''t include what the X server composites\n";
+        printf "* on X11 the CPU column is the window manager alone: the X server does\n  part of the compositing and all of the drawing, and holding either\n  against a Wayland column reads high or low. Compare X11 with X11.\n";
 }
 ' "${FILES[@]}"

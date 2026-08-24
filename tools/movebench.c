@@ -24,6 +24,7 @@
 #include "gate.h"
 #include "now.h"
 #include "stage.h"
+#include "place.h"
 
 #define WINW 1000               /* the size a big screen uses */
 #define WINH 700
@@ -59,70 +60,15 @@ static void mark (const char *s)
 static int plain_moves;         /* the pager request did nothing here */
 
 /*
- * Move (and size) a window. The pager request _NET_MOVERESIZE_WINDOW is tried
- * first because some compositors quietly ignore a plain client move of a
- * mapped window (mutter on Wayland does); others ignore the pager request
- * instead (labwc), and there the plain call is used. probe_moves() decides
- * which, once, by looking at where the window actually went.
+ * Move (and size) a window, the way bench_probe_move() found this session
+ * honours. See lib/place.c: some compositors ignore a plain client move of a
+ * mapped window (mutter on Wayland does), others ignore the pager request
+ * (labwc), and one ignores both (cosmic-comp).
  */
 static void put_window (Display *d, Window root, Window win,
                         int x, int y, int w, int h)
 {
-    XClientMessageEvent mev;
-
-    if (plain_moves)
-    {
-        if (w > 0)
-        {
-            XMoveResizeWindow (d, win, x, y, (unsigned) w, (unsigned) h);
-        }
-        else
-        {
-            XMoveWindow (d, win, x, y);
-        }
-
-        return;
-    }
-
-    memset (&mev, 0, sizeof mev);
-    mev.type = ClientMessage;
-    mev.window = win;
-    mev.message_type = XInternAtom (d, "_NET_MOVERESIZE_WINDOW", False);
-    mev.format = 32;
-    mev.data.l[1] = x;
-    mev.data.l[2] = y;
-    if (w > 0)
-    {
-        mev.data.l[0] = 10 | (15 << 8) | (2 << 12);
-        mev.data.l[3] = w;
-        mev.data.l[4] = h;
-    }
-    else
-    {
-        mev.data.l[0] = 10 | (3 << 8) | (2 << 12);
-    }
-    XSendEvent (d, root, False,
-                SubstructureNotifyMask | SubstructureRedirectMask,
-                (XEvent *) &mev);
-}
-
-static void probe_moves (Display *d, Window root, Window win,
-                         int x, int y, int w, int h)
-{
-    int px, py;
-    Window ch;
-
-    put_window (d, root, win, x, y, w, h);
-    XSync (d, False);
-    usleep (400000);
-    XTranslateCoordinates (d, win, root, 0, 0, &px, &py, &ch);
-    if (px < x - 80 || px > x + 80 || py < y - 80 || py > y + 80)
-    {
-        plain_moves = 1;
-        put_window (d, root, win, x, y, w, h);
-        XSync (d, False);
-        usleep (300000);
-    }
+    bench_move (d, root, win, x, y, w, h, plain_moves);
 }
 
 int main (int argc, char **argv)
@@ -224,7 +170,12 @@ int main (int argc, char **argv)
 
     tasks = bench_tasks ();
     warm = (tasks > 0) ? 60 : 0;        /* the first moves are not counted */
-    probe_moves (d, root, win, cx, base_y, winw, winh);
+    {
+        int way = bench_probe_move (d, root, win, cx, base_y, winw, winh);
+
+        plain_moves = (way == 1);
+    }
+
 
     start = bench_now ();
     mstart = start;
@@ -259,6 +210,16 @@ int main (int argc, char **argv)
         /* Wait for the server to have done it, so this counts real work */
         XSync (d, False);
         steps++;
+        /*
+         * Now and then, look at where the window really is. A compositor can
+         * take every request and act on none of them, and then this row is a
+         * measurement of a window sitting still - the smallest number in the
+         * table, which reads as the best result in it.
+         */
+        if ((i % 64) == 0)
+        {
+            bench_watch (d, win);
+        }
 
         if (tasks > 0)
         {
@@ -315,6 +276,20 @@ int main (int argc, char **argv)
 
     XDestroyWindow (d, win);
     XCloseDisplay (d);
+
+    /*
+     * The window never went anywhere, so there is no moving to measure. Say
+     * so with a status of its own: the row is left empty rather than filled
+     * with the small number a compositor doing nothing produces, which reads
+     * as the best result in the table.
+     */
+    if (!bench_moved () && !resize)
+    {
+        printf ("MOVE-NEVER-HAPPENED the window stayed where it was\n");
+        fflush (stdout);
+
+        return 3;
+    }
 
     return 0;
 }

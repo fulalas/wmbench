@@ -41,6 +41,7 @@
 #include "gate.h"
 #include "now.h"
 #include "stage.h"
+#include "place.h"
 
 #define WINW 900                /* the size a big screen uses */
 #define WINH 700
@@ -89,6 +90,7 @@ static const char *phase;       /* which part of the pass to run */
 static int fixed;               /* a fixed number of passes, not a clock */
 static int doc_px;              /* how far it is scrolled, in pixels */
 static double pace;
+static double run_start, run_seconds;   /* the clock, when there is one */
 static Atom net_state, state_max_h, state_max_v, state_fs, net_moveresize_atom;
 static const char *ckdir;
 static FILE *manifest;
@@ -121,9 +123,23 @@ static void mark (const char *s)
     fflush (stdout);
 }
 
+static int time_up (void);
+
 static void step (void)
 {
     XSync (d, False);
+    /*
+     * On the clock, once the time is up the rest of the pass is walked
+     * through without the pause between actions: the phases stop at their
+     * own boundaries, and waiting a third of a second at each remaining one
+     * is how five seconds used to turn into ten. Those hurried actions are
+     * not counted either, or the rate at the end would be a rate nobody
+     * worked at.
+     */
+    if (time_up ())
+    {
+        return;
+    }
     actions++;
     usleep ((useconds_t) (pace * 1e6));
 }
@@ -193,11 +209,6 @@ static void checkpoint_of (Window w, const char *name,
     cknum++;
 }
 
-/*
- * Move (and size, when tw is not 0) through _NET_MOVERESIZE_WINDOW, the
- * pager request: some compositors quietly ignore a plain client move of a
- * mapped window (mutter on Wayland does), but a pager is obeyed.
- */
 static void checkpoint (const char *name, int ax, int ay, int aw, int ah)
 {
     checkpoint_of (wa, name, ax, ay, aw, ah);
@@ -208,48 +219,29 @@ static int want_phase (const char *name)
     return strcmp (phase, "all") == 0 || strcmp (phase, name) == 0;
 }
 
-static int plain_moves;         /* the pager request did nothing here */
-
-static void net_move (Window w, int x, int y, int tw, int th)
+/*
+ * Fixed work runs to the last task whatever the clock says. On the clock,
+ * a pass is longer than any sensible number of seconds, so the phases ask
+ * between steps whether the time is up instead of overrunning by a whole one.
+ */
+static int time_up (void)
 {
-    XClientMessageEvent ev;
-
-    /*
-     * Some compositors ignore _NET_MOVERESIZE_WINDOW for X11 windows - labwc
-     * does, and then nothing moves or resizes at all. Where the probe below
-     * found that, the plain client call is used instead.
-     */
-    if (plain_moves)
-    {
-        if (tw > 0)
-        {
-            XMoveResizeWindow (d, w, x, y, (unsigned) tw, (unsigned) th);
-        }
-        else
-        {
-            XMoveWindow (d, w, x, y);
-        }
-
-        return;
-    }
-
-    memset (&ev, 0, sizeof ev);
-    ev.type = ClientMessage;
-    ev.window = w;
-    ev.message_type = net_moveresize_atom;
-    ev.format = 32;
-    /* StaticGravity, x and y valid, w and h too when given, from a pager */
-    ev.data.l[0] = 10 | (3 << 8) | ((tw > 0 ? 12 : 0) << 8) | (2 << 12);
-    ev.data.l[1] = x;
-    ev.data.l[2] = y;
-    ev.data.l[3] = tw;
-    ev.data.l[4] = th;
-    XSendEvent (d, root, False,
-                SubstructureNotifyMask | SubstructureRedirectMask,
-                (XEvent *) &ev);
+    return !fixed && bench_now () - run_start >= run_seconds;
 }
 
-/* Ask the window manager, the way a pager or the window itself would */
+static int plain_moves;         /* the pager request did nothing here */
+static int scene_wrong;         /* the windows are not where the phase needs them */
+
+/*
+ * Move (and size, when tw is not 0) the way bench_probe_move() found this
+ * session honours. See lib/place.c.
+ */
+static void net_move (Window w, int x, int y, int tw, int th)
+{
+    bench_move (d, root, w, x, y, tw, th, plain_moves);
+}
+
+/* Maximise, minimise, fullscreen: the window manager's own states */
 static void set_state (Window w, int on, Atom a, Atom b)
 {
     XClientMessageEvent ev;
@@ -271,6 +263,10 @@ static void set_state (Window w, int on, Atom a, Atom b)
 /* Back to a known place and size, whatever the last phase left behind */
 static void reset_window (Window w, int x, int y)
 {
+    if (time_up ())
+    {
+        return;
+    }
     set_state (w, 0, state_max_h, state_max_v);
     set_state (w, 0, state_fs, None);
     net_move (w, x, y, winw, winh);
@@ -290,6 +286,10 @@ static void walk_and_snap (Window w, int cx, int cy,
     int x0, y0, wx, wy, i;
     Window child;
 
+    if (time_up ())
+    {
+        return;
+    }
     XGetWindowAttributes (d, w, &at);
     XTranslateCoordinates (d, w, root, 0, 0, &x0, &y0, &child);
     wx = cx - at.width / 2;
@@ -302,6 +302,11 @@ static void walk_and_snap (Window w, int cx, int cy,
     }
     net_move (w, tx, ty, tw, th);
     step ();
+    /*
+     * Where it really went. A compositor can take every one of these and act
+     * on none of them, and then the phase measured a window sitting still.
+     */
+    bench_watch (d, w);
 }
 
 /*
@@ -412,6 +417,10 @@ static void doc_glide (int to, int frames, int press_up, int press_down)
 {
     int from = doc_px, i;
 
+    if (time_up ())
+    {
+        return;
+    }
     if (to < 0)
     {
         to = 0;
@@ -516,6 +525,10 @@ static void drag_resize (int x0, int y0, int w0, int h0,
     int i, x, y, w, h;
     struct timespec next;
 
+    if (time_up ())
+    {
+        return;
+    }
     clock_gettime (CLOCK_MONOTONIC, &next);
     for (i = 1; i <= frames; i++)
     {
@@ -575,8 +588,6 @@ static void drag_resize (int x0, int y0, int w0, int h0,
 static void resize_phase (int bx, int by)
 {
     int gw = winw + 600, gh = winh + 400, tx, ty;
-
-    bands_ready ();
 
 
     /* Grow only as far as the stage allows, frame and panels included */
@@ -839,6 +850,22 @@ static void dnd_phase (int bx, int by)
     net_move (wb, rx, by, winw, winh);
     XSync (d, False);
     usleep (300000);
+    /*
+     * The two views have to be side by side. Where they are is the question
+     * here, not whether they moved: dragging icons into a window hidden
+     * behind the one they left is not what this measures, however the two of
+     * them came to be stacked that way.
+     */
+    if (!bench_placed (d, wa, lx, by, "usagebench A"))
+    {
+        scene_wrong = 1;
+    }
+    if (!bench_placed (d, wb, rx, by, "usagebench B"))
+    {
+        scene_wrong = 1;
+    }
+    XSync (d, False);
+    usleep (300000);
     draw_view (wa, "Pictures", home, NICON, 0);
     draw_view (wb, "Album", album, 0, 0);
     step ();
@@ -861,7 +888,7 @@ static void dnd_phase (int bx, int by)
     draw_icon (carrier[0], 1, 1, order[0]);
     XSync (d, False);
 
-    for (k = 0; k < 4; k++)
+    for (k = 0; k < 4 && !time_up (); k++)
     {
         i = order[k];
         icon_cell (i, &cx, &cy);
@@ -882,7 +909,7 @@ static void dnd_phase (int bx, int by)
         checkpoint_of (wa, ckname, lx, by, winw, winh);
 
         /* Carried across in an arc, the way a hand moves */
-        for (f = 1; f <= 55; f++)
+        for (f = 1; f <= 55 && !time_up (); f++)
         {
             double t = (double) f / 55.0;
 
@@ -964,7 +991,7 @@ static void dnd_phase (int bx, int by)
         XSync (d, False);
         usleep (300000);
 
-        for (f = 1; f <= 55; f++)
+        for (f = 1; f <= 55 && !time_up (); f++)
         {
             double t = (double) f / 55.0;
 
@@ -1162,46 +1189,31 @@ int main (int argc, char **argv)
         }
     }
 
-    /*
-     * Which way of moving a window this session honours: ask the pager way,
-     * then look. A frame can offset the answer, so only a wild miss counts.
-     */
-    {
-        int px, py, off = 60;
-        Window pch;
-        XWindowAttributes pat;
+    XSync (d, False);
+    sleep (2);
 
-        /*
-         * Ask for a different place and a different size, then look at both.
-         * Smaller, not bigger: bigger would step outside the stage for as
-         * long as the probe lasts.
-         */
-        net_move (wa, base_x + off, base_y + off, winw - off, winh - off);
-        XSync (d, False);
-        usleep (500000);
-        XTranslateCoordinates (d, wa, root, 0, 0, &px, &py, &pch);
-        XGetWindowAttributes (d, wa, &pat);
-        if (px < base_x + off - 80 || px > base_x + off + 80 ||
-            py < base_y + off - 80 || py > base_y + off + 80 ||
-            pat.width != winw - off || pat.height != winh - off)
-        {
-            plain_moves = 1;
-        }
-        net_move (wa, base_x, base_y, winw, winh);
-        XSync (d, False);
-        usleep (300000);
-        printf ("moves: %s\n", plain_moves ? "plain client calls"
-                                            : "the pager request");
-        fflush (stdout);
+    /* Which way of moving a window this session honours. See lib/place.c */
+    {
+        int way = bench_probe_move (d, root, wa, base_x, base_y, winw, winh);
+
+        plain_moves = (way == 1);
         if (manifest != NULL)
         {
             fprintf (manifest, "-- moves: %s\n",
-                     plain_moves ? "plain client calls" : "the pager request");
+                     (way == 0) ? "the pager request"
+                   : (way == 1) ? "plain client calls"
+                                : "neither way works");
             fflush (manifest);
         }
     }
-    XSync (d, False);
-    sleep (2);
+    /*
+     * The pattern becomes both windows' background before anything resizes
+     * them. Every strip a window gains - maximised, snapped, dragged wider -
+     * is then filled by the server from the pattern. Without it the new area
+     * is undefined, and undefined is not the same thing twice: mutter left
+     * the old pixels in the corner where xfwm4 and kwin left black.
+     */
+    bands_ready ();
     draw_content (wa, 0);
     draw_content (wb, 3 * BAND);
     XSync (d, False);
@@ -1214,6 +1226,8 @@ int main (int argc, char **argv)
         mark ("MEASURE-START");
     }
     start = bench_now ();
+    run_start = start;
+    run_seconds = seconds;
     do
     {
       if (want_phase ("windows"))
@@ -1353,6 +1367,29 @@ int main (int argc, char **argv)
     XDestroyWindow (d, wa);
     XDestroyWindow (d, wb);
     XCloseDisplay (d);
+
+    /*
+     * Snapping and drag and drop are both built out of moves. Where nothing
+     * moves, the windows never took the shape the phase is about - the icons
+     * were dragged into a window sitting underneath the one they left - so
+     * the row is left empty rather than filled with a number for a scene
+     * nobody designed. Resizing and scrolling do not move anything, and are
+     * still worth measuring.
+     */
+    if (want_phase ("windows") && !bench_moved ())
+    {
+        printf ("MOVE-NEVER-HAPPENED the window stayed where it was\n");
+        fflush (stdout);
+
+        return 3;
+    }
+    if (want_phase ("dnd") && scene_wrong)
+    {
+        printf ("MOVE-NEVER-HAPPENED the two views never sat side by side\n");
+        fflush (stdout);
+
+        return 3;
+    }
 
     return 0;
 }

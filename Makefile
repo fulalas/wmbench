@@ -22,6 +22,7 @@ GATE    = lib/gate.c lib/gate.h
 NOW     = lib/now.c lib/now.h
 POLITE  = lib/polite.c lib/polite.h
 STAGE   = lib/stage.c lib/stage.h
+PLACE   = lib/place.c lib/place.h
 
 TOOLS  = tools/cmcheck tools/restack tools/fsbench2 tools/movebench \
          tools/transbench tools/manywin tools/popbench tools/argbbench \
@@ -40,20 +41,20 @@ tools/cmcheck: tools/cmcheck.c
 	$(CC) $(CFLAGS) $(INC) -o $@ $< $(X11)
 tools/fsbench2: tools/fsbench2.c $(POLITE) $(GATE) $(NOW) $(STAGE)
 	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/polite.c lib/gate.c lib/now.c lib/stage.c $(GL)
-tools/movebench: tools/movebench.c $(GATE) $(NOW) $(STAGE)
-	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/gate.c lib/now.c lib/stage.c $(X11) $(LIBM)
-tools/transbench: tools/transbench.c $(POLITE) $(GATE) $(NOW) $(STAGE)
-	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/polite.c lib/gate.c lib/now.c lib/stage.c $(X11)
-tools/manywin: tools/manywin.c $(STAGE)
-	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/stage.c $(X11)
-tools/popbench: tools/popbench.c $(GATE) $(NOW) $(STAGE)
-	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/gate.c lib/now.c lib/stage.c $(X11)
-tools/argbbench: tools/argbbench.c $(GATE) $(NOW)
-	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/gate.c lib/now.c $(X11)
-tools/videobench: tools/videobench.c $(GATE) $(NOW)
-	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/gate.c lib/now.c $(X11) -lXext
-tools/usagebench: tools/usagebench.c $(CAPTURE) $(POLITE) $(GATE) $(NOW) $(STAGE)
-	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/capture.c lib/polite.c lib/gate.c lib/now.c lib/stage.c $(X11)
+tools/movebench: tools/movebench.c $(GATE) $(NOW) $(STAGE) $(PLACE)
+	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/gate.c lib/now.c lib/stage.c lib/place.c $(X11) $(LIBM)
+tools/transbench: tools/transbench.c $(POLITE) $(GATE) $(NOW) $(STAGE) $(PLACE)
+	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/polite.c lib/gate.c lib/now.c lib/stage.c lib/place.c $(X11)
+tools/manywin: tools/manywin.c $(STAGE) $(PLACE)
+	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/stage.c lib/place.c $(X11)
+tools/popbench: tools/popbench.c $(GATE) $(NOW) $(STAGE) $(PLACE)
+	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/gate.c lib/now.c lib/stage.c lib/place.c $(X11)
+tools/argbbench: tools/argbbench.c $(GATE) $(NOW) $(PLACE)
+	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/gate.c lib/now.c lib/place.c $(X11)
+tools/videobench: tools/videobench.c $(GATE) $(NOW) $(PLACE)
+	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/gate.c lib/now.c lib/place.c $(X11) -lXext
+tools/usagebench: tools/usagebench.c $(CAPTURE) $(POLITE) $(GATE) $(NOW) $(STAGE) $(PLACE)
+	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/capture.c lib/polite.c lib/gate.c lib/now.c lib/stage.c lib/place.c $(X11)
 
 # Every check photographs the screen through lib/capture.c, which knows how to
 # do it on plain X11 and through an external screenshot command under Wayland

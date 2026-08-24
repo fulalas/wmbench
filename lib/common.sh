@@ -562,7 +562,30 @@ detect_wm () {
         WM_PIDS="$WM_PID $(pgrep -x "$helpers" | tr '\n' ' ')"
     fi
 
+    # On X11 a good part of compositing happens inside the X server: it owns
+    # the windows' pixmaps and hands them over, and the window manager's own
+    # process never sees that time. Counting the server too is what makes the
+    # CPU column mean the same thing as it does on Wayland, where there is no
+    # server to count. On Wayland Xwayland is left out: nothing here runs
+    # through it unless the session itself does.
+    X_PIDS=""
+    if [ "$(session_type)" = x11 ]; then
+        X_PIDS=$(pgrep -x 'Xorg|X|Xephyr' | tr '\n' ' ')
+    fi
+
     [ -n "$WM_NAME" ]
+}
+
+# The X server's CPU, in the same milliseconds wm_cpu reports, or empty where
+# there is no server of ours to read
+x_cpu () {
+    local p f ticks=""
+    for p in ${X_PIDS:-}; do
+        read -r -a f < "/proc/$p/stat" 2>/dev/null || continue
+        [ -n "${f[13]:-}" ] || continue
+        ticks=$(( ${ticks:-0} + f[13] + f[14] ))
+    done
+    [ -n "$ticks" ] && echo $((ticks * 10))
 }
 
 # A command that writes a full-screen PPM to the path it is given, for the
@@ -593,31 +616,72 @@ pick_capture_cmd () {
 # screen, so no task at all is done before the load is up. See gate.c.
 STRESS_FRAMES=${RENDER_FRAMES:-1200}    # 20 s of frames at 60 a second
 
-# Bottom first: the last name ends up on top. Order fixed so that the same
-# windows are covered, and so the same amount of work is composited, every run.
+# Bottom first: the last one opened ends up on top. The order is fixed so that
+# the same windows are covered, and so the same amount of work is composited,
+# every run.
 STRESS_STACK=("fsbench" "popbench background" "transbench background"
               "manywin" "movebench resize" "movebench" "transbench translucent")
 
 # Start the whole mix held at gate $1, logs named "$2-<load>.log". Fills
-# STRESS_NAMES, STRESS_LOGS and STRESS_PIDS, in step with each other.
+# STRESS_NAMES, STRESS_LOGS and STRESS_PIDS, in step with each other, and
+# STRESS_SCENERY_PID with the filler windows, which count nothing and are
+# killed by the caller.
+#
+# One at a time, each window waited for before the next is opened. A window
+# goes on top of the ones already there, on every window manager, so opening
+# them in order is the order - no raise has to be asked for, and nothing
+# depends on the window manager granting one. Starting all six at once left
+# them mapping in a race, and the restack that tried to sort it out afterwards
+# was honoured in part and differently each run.
 stress_start () {
     STRESS_GATE=$1; STRESS_PRE=$2
-    STRESS_NAMES=(); STRESS_LOGS=(); STRESS_PIDS=()
+    STRESS_NAMES=(); STRESS_LOGS=(); STRESS_PIDS=(); STRESS_LATE=0
     local r=$STRESS_FRAMES
 
-    stress_load move   $((2 * r))       ./tools/movebench 0 move 120
-    stress_load popups $(((r + 2) / 3)) ./tools/popbench 0 20 4
-    stress_load trans  "$r"             ./tools/transbench 0 0.75 60
-    stress_load resize $((2 * r))       ./tools/movebench 0 resize 120
-    stress_load render "$r"             ./tools/fsbench2 0 windowed 60
+    stress_load render "$r"             "fsbench" \
+        ./tools/fsbench2 0 windowed 60
+    stress_load popups $(((r + 2) / 3)) "popbench background" \
+        ./tools/popbench 0 20 4
+    # transbench opens a background window and a translucent one over it. One
+    # program owns both, so opening cannot separate them: its background lands
+    # here, and the translucent one is put back on top below.
+    stress_load trans  "$r"             "transbench translucent" \
+        ./tools/transbench 0 0.75 60
+    ./tools/manywin 12 > "$STRESS_PRE-many.log" 2>&1 &
+    STRESS_SCENERY_PID=$!
+    ./tools/restack -wait "manywin" || STRESS_LATE=1
+    stress_load resize $((2 * r))       "movebench resize" \
+        ./tools/movebench 0 resize 120
+    stress_load move   $((2 * r))       "movebench" \
+        ./tools/movebench 0 move 120
 }
 
-stress_load () {                # $1 name, $2 tasks, $3... the program
-    local name=$1 tasks=$2 log="$STRESS_PRE-$1.log"
-    shift 2
+# The order the windows were opened in is the order they are stacked in, with
+# the one exception above. Put that one back on top, then say whether the whole
+# order took: a desktop that stacks them some other way composites a different
+# scene, and its numbers are not the same measurement as anyone else's.
+#
+# The fallback is the old way - ask for the whole order - for a window manager
+# that will not simply stack them as they open. Better a scene put right by
+# asking than no row at all.
+stress_settle () {
+    ./tools/restack -w "transbench translucent" > "$STRESS_PRE-restack.log" 2>&1
+    ./tools/restack -c "${STRESS_STACK[@]}" >> "$STRESS_PRE-restack.log" 2>&1 &&
+        return 0
+    ./tools/restack -w "${STRESS_STACK[@]}" >> "$STRESS_PRE-restack.log" 2>&1
+    ./tools/restack -c "${STRESS_STACK[@]}" >> "$STRESS_PRE-restack.log" 2>&1
+}
+
+stress_load () {                # $1 name, $2 tasks, $3 window, $4... program
+    local name=$1 tasks=$2 win=$3 log="$STRESS_PRE-$1.log"
+    shift 3
     : > "$log"
     BENCH_GO="$STRESS_GATE" BENCH_TASKS=$tasks "$@" >> "$log" 2>&1 &
     STRESS_NAMES+=("$name"); STRESS_LOGS+=("$log"); STRESS_PIDS+=("$!")
+    # On screen before the next one is opened, or they race for the order. A
+    # window that never appears is not a stacking question, it is a broken
+    # load, and the caller is told rather than left to guess later.
+    ./tools/restack -wait "$win" >> "$log" 2>&1 || STRESS_LATE=1
 }
 
 # Wait until every load is set up and waiting at the gate. A program still

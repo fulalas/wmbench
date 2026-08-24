@@ -28,6 +28,7 @@
 
 #include "gate.h"
 #include "now.h"
+#include "place.h"
 
 /*
  * Fixed work: BENCH_TASKS=N does exactly N tasks, however long that takes, so
@@ -108,6 +109,7 @@ int main (int argc, char **argv)
     gc = XCreateGC (d, win, 0, NULL);
     XSync (d, False);
     sleep (2);
+    bench_placed (d, win, 100, 100, "videobench");
 
     memset (&shm, 0, sizeof shm);
     img = XShmCreateImage (d, DefaultVisual (d, scr), DefaultDepth (d, scr),

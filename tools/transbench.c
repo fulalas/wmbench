@@ -22,6 +22,7 @@
 #include "gate.h"
 #include "now.h"
 #include "stage.h"
+#include "place.h"
 
 #define MIN(a,b) (((a) < (b)) ? (a) : (b))
 
@@ -132,6 +133,8 @@ int main (int argc, char **argv)
     polite_activate (d, RootWindow (d, scr), fg);
     XSync (d, False);
     sleep (1);
+    bench_placed (d, bg, sx, sy, "transbench background");
+    bench_placed (d, fg, sx + 220, sy + 220, "transbench translucent");
 
     /* Detail underneath, so the blend has something to read */
     for (i = 0; i < 400; i++)
