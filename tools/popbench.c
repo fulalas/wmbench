@@ -14,7 +14,7 @@
  *
  * A small height matters: the GL renderer draws shadows from one shared
  * procedural profile only for windows at least twice the blur radius, and falls
- * back to building a gaussian on the processor and uploading it for anything
+ * back to building a gaussian on the CPU and uploading it for anything
  * smaller. Tooltips are short and wide, so they take the fallback.
  */
 #include <stdio.h>

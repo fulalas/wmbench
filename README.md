@@ -32,6 +32,10 @@ own content, so a compositor that quietly ignores a move is caught.
 
 The tests need an idle screen, otherwise they might fail.
 
+What happens after the framebuffer is beyond every check here: corruption
+produced in the display pipeline, by colour compression for instance, is on the
+panel but in no capture, so a clean verdict does not cover it.
+
 Each test answers with one of four statuses, which is what the report prints:
 **passed**, **failed** (the compositor is at fault), **could not run** (no
 display, no way to photograph the screen) and **not available** (the compositor

@@ -7,7 +7,7 @@
 #   cooler and wins, whatever it is. Every rig here alternates, and a
 #   comparison that does not is worthless however tight its samples look.
 #
-#   Compare within one condition. A per-paint processor or GPU figure is not
+#   Compare within one condition. A per-paint CPU or GPU figure is not
 #   comparable between an idle desktop and a loaded one, or between a capped
 #   and an uncapped run: the clocks differ. Only put numbers side by side when
 #   the state they were taken in is the same.
@@ -26,15 +26,15 @@
 #
 # What a machine can give:
 #   AMD integrated    the amdgpu hwmon labelled PPT already covers the
-#                     processor cores and the graphics together
-#   AMD discrete      that same file is the board alone, so the processor is
+#                     CPU cores and the GPU together
+#   AMD discrete      that same file is the board alone, so the CPU is
 #                     added from RAPL
-#   Intel integrated  no GPU hwmon, and the RAPL package covers the processor
+#   Intel integrated  no GPU hwmon, and the RAPL package covers the CPU
 #                     and the graphics together
 #
 # Anything else is refused rather than reported. A board figure with no
-# processor figure would read like a whole-machine one and be wrong by the
-# entire processor, and there is nothing in a bare number to say so.
+# CPU figure would read like a whole-machine one and be wrong by the
+# entire CPU, and there is nothing in a bare number to say so.
 
 # The graphics sensor, if a driver we trust exposes one. Echoes "path label".
 find_gpu_power () {
@@ -58,7 +58,7 @@ find_gpu_power () {
     return 1
 }
 
-# The processor's energy counter. Most kernels keep it readable by root only,
+# The CPU's energy counter. Most kernels keep it readable by root only,
 # so being unable to read it is the common case and worth saying out loud.
 POWER_ENERGY_LOCKED=""
 find_cpu_energy () {
@@ -111,7 +111,7 @@ find_gpu_energy () {
 # NVIDIA boards keep their power behind the proprietary driver's NVML, so the
 # only way to it is nvidia-smi. Streamed for a whole window rather than forked
 # per sample: a fork every tenth of a second would show up in the very
-# processor figures being measured.
+# CPU figures being measured.
 find_nvidia_power () {
     command -v nvidia-smi >/dev/null 2>&1 || return 1
     nvidia-smi --query-gpu=power.draw --format=csv,noheader,nounits \
@@ -170,7 +170,7 @@ power_choose () {
             echo "  $POWER_ENERGY_LOCKED exists but is root-only. Unlock it with" >&2
             echo "  sudo chmod a+r $POWER_ENERGY_LOCKED" >&2
         else
-            echo "  No RAPL package counter for the processor either." >&2
+            echo "  No RAPL package counter for the CPU either." >&2
         fi
     fi
 }
@@ -317,7 +317,7 @@ amdgpu_device () {
 }
 
 
-# The compositor's processor time in milliseconds: the window manager plus any
+# The compositor's CPU time in milliseconds: the window manager plus any
 # helper of its own that draws, which for compiz is the program that paints its
 # window frames. Prints nothing at all when there is no readable process, so a
 # session where this cannot be measured says so instead of reporting zero.
@@ -428,8 +428,24 @@ red   () { printf '%s%s%s\n' "$RED" "$*" "$OFF"; }
 # Everything printed from here on goes to the screen and to the file $1: in
 # colour on the screen, and with the colours taken back out on the way into the
 # file, line by line, so a run cut short still leaves what it printed.
+# The "== data" block at the very end is for compare_results.sh to read, not
+# for a person, so the screen stops there while the file keeps it.
 tee_report () {
-    exec > >(tee >(sed -u 's/\x1b\[[0-9;]*m//g' > "$1")) 2>&1
+    exec > >(tee >(sed -u 's/\x1b\[[0-9;]*m//g' > "$1") |
+             sed -u '/^== data$/,$d') 2>&1
+    REPORT_PID=$!
+}
+
+# The last thing a report does: close the stream and give the writers behind it
+# the moment they need to put the final lines in the file. Waiting outright can
+# hang on a stray background job holding the pipe open, so it is a bounded wait.
+end_report () {
+    exec 1>&- 2>&-
+    [ -n "${REPORT_PID:-}" ] || return 0
+    for _ in $(seq 50); do
+        kill -0 "$REPORT_PID" 2>/dev/null || return 0
+        sleep 0.1
+    done
 }
 
 # x11 or wayland. XDG_SESSION_TYPE lies less than it used to, but a live
@@ -477,7 +493,7 @@ wm_canon () {
 }
 
 # The window manager of this session. Sets WM_NAME (mutter, kwin, xfwm4, ...),
-# WM_PID, the process whose processor time is the compositor's, and WM_PIDS,
+# WM_PID, the process whose CPU time is the compositor's, and WM_PIDS,
 # that process together with any helper of its own that draws.
 #
 # On X11 the running window manager is asked first, because it is the only

@@ -115,8 +115,9 @@ if [ "$PIXELS" = 1 ]; then
         report "${c}_check" $rc "$why"
         alive || break
     done
-    echo
 fi
+
+echo
 
 # The checkpoints: geometry asked for against geometry got, and a photograph of
 # the window's own content at each step, so a compositor that quietly ignores a
@@ -252,5 +253,6 @@ if ls "$CK"/ck-*.ppm >/dev/null 2>&1 || [ -s "$CK/manifest.txt" ]; then
 else
     rmdir "$CK" 2>/dev/null
 fi
+end_report
 [ "${#FAILURES[@]}" = 0 ] && exit 0
 exit 1

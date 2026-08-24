@@ -6,7 +6,7 @@
  * window's pixels come from. Everything else either renders with OpenGL or
  * draws with X primitives; a player hands over a buffer of pixels it made
  * itself, with XShmPutImage. The pixmap the compositor then samples as a
- * texture has been filled by the processor, and may not be laid out the way a
+ * texture has been filled by the CPU, and may not be laid out the way a
  * GPU-rendered one is. If sampling it is slow, this is where the OpenGL
  * renderer would lose.
  *

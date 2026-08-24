@@ -150,10 +150,25 @@ END {
 
     print "== notes";
 
+    # Who won what, first: it is what the tables are read for
+    bw = 1e9; bwk = ""; bc = 1e9; bck = ""; bf = 0; bfk = "";
+    for (j = 1; j <= nkeys; j++)
+    {
+        k2 = order[j];
+        v = val(k2, "total", pw, pwn);   if (v != "" && v < bw) { bw = v; bwk = k2 }
+        v = val(k2, "total", cpu, cpun);  if (v != "" && v < bc) { bc = v; bck = k2 }
+        v = (fpsn[k2] ? fps[k2] / fpsn[k2] : 0);
+        if (v > bf) { bf = v; bfk = k2 }
+    }
+    # Nothing wins a column that nobody could measure
+    if (bfk != "") printf "* fastest: %s, %.1f fps\n", bfk, bf;
+    if (bwk != "") printf "* more efficient: %s, %.2f W\n", bwk, bw;
+    if (bck != "") printf "* least CPU time: %s, %.2f s\n", bck, bc;
+
     # Only what changes a reading of the tables. Long notes do not get read.
     for (j = 1; j <= nkeys; j++)
         if (runs[order[j]] == 1)
-            printf "* %s: one run, not an average\n", order[j];
+            printf "* %s: 1 run\n", order[j];
         else
             printf "* %s: average of %d runs\n", order[j], runs[order[j]];
 
@@ -173,33 +188,18 @@ END {
     }
 
     # A window manager that does not composite is the floor, not a rival. It
-    # said so itself when it ran; a low processor total is not the same thing,
+    # said so itself when it ran; a low CPU total is not the same thing,
     # since a cheap compositor has one too.
     for (j = 1; j <= nkeys; j++)
         if (nocomp[order[j]])
             printf "* %s is not compositing: read it as the floor\n", order[j];
 
-    printf "* the second fullscreen row asks compositing to step aside: less power there means the desktop did it\n";
+    printf "* fullscreen asked test if the compositor is disabled when asked\n";
 
     x = "";
     for (j = 1; j <= nkeys; j++)
         if (isx11[order[j]]) x = x (x == "" ? "" : ", ") order[j];
     if (x != "")
-        printf "* on X11 some compositing happens inside the X server, so the CPU column understates it\n";
-
-    # Who won what
-    bw = 1e9; bwk = ""; bc = 1e9; bck = ""; bf = 0; bfk = "";
-    for (j = 1; j <= nkeys; j++)
-    {
-        k2 = order[j];
-        v = val(k2, "total", pw, pwn);   if (v != "" && v < bw) { bw = v; bwk = k2 }
-        v = val(k2, "total", cpu, cpun);  if (v != "" && v < bc) { bc = v; bck = k2 }
-        v = (fpsn[k2] ? fps[k2] / fpsn[k2] : 0);
-        if (v > bf) { bf = v; bfk = k2 }
-    }
-    # Nothing wins a column that nobody could measure
-    if (bwk != "") printf "* cheapest: %s, %.2f W\n", bwk, bw;
-    if (bck != "") printf "* least processor time: %s, %.2f s\n", bck, bc;
-    if (bfk != "") printf "* fastest: %s, %.1f fps\n", bfk, bf;
+        printf "* on X11 the CPU column misses what the X server composites\n";
 }
 ' "${FILES[@]}"

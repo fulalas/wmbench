@@ -37,7 +37,7 @@ tests:
             the last of them has finished it - not on the clock
 
 Every test does the same fixed amount of work in every session, however long
-that takes, so power and processor time compare directly; the time it took is
+that takes, so power and CPU time compare directly; the time it took is
 a result, not a setting. The one exception is uncapped, which is deliberately
 flat out and reports only frames a second.
 
@@ -119,7 +119,7 @@ else
 fi
 echo "compositor: $WM_NAME $(wm_version) (compositing $COMPOSITING)"
 [ -z "$WM_PID" ] &&
-    echo "            its process cannot be seen, so the processor column is" &&
+    echo "            its process cannot be seen, so the CPU column is" &&
     echo "            left empty rather than filled with zeros"
 [ "$POWER_OK" = 1 ] && echo "power:      $POWER_DESC" \
                      || echo "power:      no sensor, not reported"
@@ -148,7 +148,7 @@ echo "running tests — do not use the computer (~$(( (EST + 59) / 60 )) min)"
 
 now_s () { date +%s.%N; }
 
-# Processor seconds between two wm_cpu readings, or "-" when either reading is
+# CPU seconds between two wm_cpu readings, or "-" when either reading is
 # missing (no visible process) or the counter went backwards (the process was
 # replaced while we watched)
 cpu_delta () {                  # $1 before, $2 after
@@ -392,7 +392,7 @@ if want stress; then
 fi
 
 # Last of all, the only timed test: how many frames the session can deliver
-# flat out. Nothing else is read from it, so no power or processor time.
+# flat out. Nothing else is read from it, so no power or CPU time.
 # Three runs, because a fullscreen window is where a compositor can step out
 # of the way: windowed, then fullscreen, then fullscreen asking to be left
 # alone with _NET_WM_BYPASS_COMPOSITOR, which is what a player sets. The
@@ -454,11 +454,20 @@ fi
 if [ "$TROWS" -gt 0 ] && [ -z "$LOADFAIL" ] && [ "$ST" = x11 ]; then
     echo
     echo "On X11 part of the compositing happens inside the X server, whose"
-    echo "processor time is not measured here."
+    echo "CPU time is not measured here."
+fi
+
+if [ -n "$LOADFAIL" ]; then
+    red "FAILED to run:$LOADFAIL - the rows are missing above; their logs"
+    red "are kept as bm-*.log"
+else
+    rm -f bm-*.log
 fi
 
 # The rows again, for compare_results.sh: watts, compositor seconds, seconds
 # elapsed, then the name. A "-" is a column this machine could not measure.
+# It goes to the result file only - on screen the table above already said it,
+# so this has to stay last, where tee_report cuts the screen off.
 if [ "${#DATA[@]}" != 0 ]; then
     echo
     echo "== data"
@@ -466,9 +475,4 @@ if [ "${#DATA[@]}" != 0 ]; then
         echo "row: $r"
     done
 fi
-if [ -n "$LOADFAIL" ]; then
-    red "FAILED to run:$LOADFAIL - the rows are missing above; their logs"
-    red "are kept as bm-*.log"
-else
-    rm -f bm-*.log
-fi
+end_report
