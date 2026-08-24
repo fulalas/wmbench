@@ -200,6 +200,6 @@ END {
     for (j = 1; j <= nkeys; j++)
         if (isx11[order[j]]) x = x (x == "" ? "" : ", ") order[j];
     if (x != "")
-        printf "* on X11 the CPU column misses what the X server composites\n";
+        printf "* on X11 the CPU column doesn'\''t include what the X server composites\n";
 }
 ' "${FILES[@]}"
