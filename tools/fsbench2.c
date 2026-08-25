@@ -127,7 +127,7 @@ int main (int argc, char **argv)
     if (d == NULL) { fprintf (stderr, "no display\n"); return 1; }
     scr = DefaultScreen (d);
     vi = glXChooseVisual (d, scr, attribs);
-    if (vi == NULL) { fprintf (stderr, "no visual\n"); return 1; }
+    if (vi == NULL) { fprintf (stderr, "no visual\n"); XCloseDisplay (d); return 1; }
 
     memset (&swa, 0, sizeof swa);
     swa.colormap = XCreateColormap (d, RootWindow (d, scr), vi->visual, AllocNone);
@@ -233,6 +233,24 @@ int main (int argc, char **argv)
                                    (getenv ("BENCH_LIGHT") != NULL)
                                    ? fs_light : fs_src));
     glLinkProgram (prog);
+    /*
+     * A failed link leaves the fixed-function pipeline drawing the quad for
+     * nothing, and the run still prints an AVERAGE - a fast, meaningless one.
+     */
+    {
+        GLint ok = 0;
+
+        glGetProgramiv (prog, GL_LINK_STATUS, &ok);
+        if (!ok)
+        {
+            char log[2048];
+
+            glGetProgramInfoLog (prog, sizeof log, NULL, log);
+            fprintf (stderr, "link: %s\n", log);
+
+            return 1;
+        }
+    }
     glUseProgram (prog);
     u_t = glGetUniformLocation (prog, "t");
 
@@ -245,15 +263,24 @@ int main (int argc, char **argv)
     frames = window_frames = 0;
     for (;;)
     {
-        XWindowAttributes wa;
         double t = bench_now ();
 
         while (XPending (d))
         {
             XNextEvent (d, &ev);
+            /*
+             * Asking the server for the size every frame is a round trip to
+             * the very desktop under test, so its cost lands in the frame
+             * rate being compared. StructureNotifyMask is selected: the size
+             * arrives here instead, for nothing.
+             */
+            if (ev.type == ConfigureNotify)
+            {
+                ww = ev.xconfigure.width;
+                wh = ev.xconfigure.height;
+            }
         }
-        XGetWindowAttributes (d, win, &wa);
-        glViewport (0, 0, wa.width, wa.height);
+        glViewport (0, 0, ww, wh);
         glUniform1f (u_t, (GLfloat) (t - start));
         glBegin (GL_QUADS);
         glVertex2f (-1.0f, -1.0f);
@@ -333,5 +360,6 @@ int main (int argc, char **argv)
     glXDestroyContext (d, ctx);
     XDestroyWindow (d, win);
     XCloseDisplay (d);
+    XFree (vi);
     return 0;
 }

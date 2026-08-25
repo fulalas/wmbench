@@ -60,6 +60,20 @@ static XImage *region_from_ppm (Display *d, const char *path,
     {
         goto out;
     }
+    /*
+     * The photograph has to be of the screen the caller's coordinates come
+     * from. Under Wayland the command writes the output's own resolution
+     * while the coordinates come from XWayland's scaled view of it, and the
+     * bounds test below would then pass on an image the region means nothing
+     * in. A check that quietly looks at the wrong place is worse than one
+     * that says it could not look, and no image is what the callers read as
+     * could not run.
+     */
+    if (sw != DisplayWidth (d, DefaultScreen (d)) ||
+        sh != DisplayHeight (d, DefaultScreen (d)))
+    {
+        goto out;
+    }
     /* The region must be on the screen the command photographed */
     if (x < 0 || y < 0 || x + (int) w > sw || y + (int) h > sh)
     {

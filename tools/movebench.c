@@ -163,8 +163,8 @@ int main (int argc, char **argv)
     for (i = 0; i < 60; i++)
     {
         XSetForeground (d, gc, colours[i % 6]);
-        XFillRectangle (d, win, gc, (i * 53) % (winw - 120),
-                        (i * 71) % (winh - 90), 120, 90);
+        XFillRectangle (d, win, gc, (i * 53) % MAX (1, winw - 120),
+                        (i * 71) % MAX (1, winh - 90), 120, 90);
     }
     XSync (d, False);
 

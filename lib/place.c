@@ -151,7 +151,12 @@ void bench_move (Display *d, Window root, Window w,
 {
     if (plain)
     {
-        if (width > 0)
+        /*
+         * Both sides, not just the width: a zero height is a BadValue and a
+         * negative one becomes an enormous unsigned, and either way Xlib's
+         * default error handler ends the program in the middle of a run.
+         */
+        if (width > 0 && height > 0)
         {
             XMoveResizeWindow (d, w, x, y, (unsigned) width, (unsigned) height);
         }
@@ -221,9 +226,12 @@ int bench_probe_move (Display *d, Window root, Window w,
     int way = -1, tries;
 
     /*
-     * Twice each way before giving up. Calling a session incapable of moving
-     * a window is a heavy thing to say - the row it belongs to is dropped -
-     * and one slow answer while the desktop is still settling is not proof.
+     * Three times each way before giving up. Calling a session incapable of
+     * moving a window is a heavy thing to say - the row it belongs to is
+     * dropped - and one slow answer while the desktop is still settling is
+     * not proof. Each attempt that fails has waited its full two seconds
+     * first, so a session that moves nothing spends about twelve seconds
+     * here before saying so.
      */
     for (tries = 0; tries < 3 && way < 0; tries++)
     {

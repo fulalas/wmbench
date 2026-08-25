@@ -11,8 +11,8 @@
  *
  * A name may match several windows (the many-window filler); all of them are
  * raised, in the order the server lists them. The window with the name is the
- * client, but what has to be raised is the frame the window manager put
- * around it, so the search walks back up to the child of the root.
+ * client, and it is the client that is named in the request: see ask_raise()
+ * for why raising the frame the window manager put around it does nothing.
  */
 #include <stdio.h>
 #include <string.h>
@@ -21,6 +21,21 @@
 
 static Display *d;
 static Window root;
+
+/*
+ * The tree is walked on a live desktop: a menu, a tooltip or a benchmark
+ * window whose load has just finished can be gone between the XQueryTree
+ * reply and the XFetchName that follows it. Xlib's default handler would end
+ * the process there, and a caller reading no "stack:" line at all blames the
+ * window manager for a race in here.
+ */
+static int swallow_x_error (Display *dd, XErrorEvent *e)
+{
+    (void) dd;
+    (void) e;
+
+    return 0;
+}
 
 /*
  * Ask for a window to be raised. Raising the frame the window manager put
@@ -238,6 +253,7 @@ int main (int argc, char **argv)
         return 2;
     }
     root = DefaultRootWindow (d);
+    XSetErrorHandler (swallow_x_error);
 
     /*
      * -w: wait for every one of these windows to be on screen before

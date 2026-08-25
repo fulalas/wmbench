@@ -77,7 +77,7 @@ int main (int argc, char **argv)
     }
     int npop = (argc > 3) ? atoi (argv[3]) : 6;
     int scr, i, j, cycles = 0;
-    int bgw, bgh, bgx, bgy, maxx;
+    int bgw, bgh, bgx, bgy, maxx, maxy;
     long tasks, warm, done = 0;
     double mstart;
 
@@ -100,11 +100,16 @@ int main (int argc, char **argv)
     bgw = BGW; bgh = BGH;
     bench_stage (d, 80, &bgx, &bgy, &bgw, &bgh);
     bgw = MIN (BGW, bgw); bgh = MIN (BGH, bgh);
-    /* How far along the popups may march before starting again */
+    /* How far along and down the popups may march before starting again */
     maxx = bgw - 200 - popw;
     if (maxx < 1)
     {
         maxx = 1;
+    }
+    maxy = bgh - 200 - poph;
+    if (maxy < 1)
+    {
+        maxy = 1;
     }
     bg = XCreateSimpleWindow (d, RootWindow (d, scr), bgx, bgy, bgw, bgh, 0,
                               BlackPixel (d, scr), BlackPixel (d, scr));
@@ -159,7 +164,7 @@ int main (int argc, char **argv)
         /* Inside the stage, and inside the background window with it */
         pop[i] = XCreateWindow (d, RootWindow (d, scr),
                                 bgx + 100 + (i * (popw + 30)) % maxx,
-                                bgy + 100 + (i % 3) * (poph + 40),
+                                bgy + 100 + ((i % 3) * (poph + 40)) % maxy,
                                 popw, poph, 0, CopyFromParent, InputOutput,
                                 CopyFromParent, CWOverrideRedirect, &swa);
     }

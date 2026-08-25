@@ -20,10 +20,16 @@ static Time server_time (Display *d, Window w)
     XChangeProperty (d, w, a, XA_STRING, 8, PropModeAppend,
                      (unsigned char *) "", 0);
     XSync (d, False);
-    while (XPending (d))
+    /*
+     * Only this window's PropertyNotify. Taking the queue apart with
+     * XNextEvent would throw away every other event waiting on the same
+     * connection, and a caller that is sitting on the queue for a map or an
+     * unmap of its own would never see it - which is how a carrier window
+     * once stayed invisible for a whole run.
+     */
+    while (XCheckTypedWindowEvent (d, w, PropertyNotify, &ev))
     {
-        XNextEvent (d, &ev);
-        if (ev.type == PropertyNotify && ev.xproperty.atom == a)
+        if (ev.xproperty.atom == a)
         {
             XSelectInput (d, w, mask);
 

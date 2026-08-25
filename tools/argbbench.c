@@ -68,6 +68,17 @@ int main (int argc, char **argv)
         rate = 120.0;
     }
     int margin = (argc > 3) ? atoi (argv[3]) : 40;
+
+    /*
+     * The redraw below moves a 400x300 patch inside the margin and takes its
+     * position modulo what is left over: a margin that leaves nothing over is
+     * a divide by zero on the first step, and one past half the window turns
+     * the opaque region, a CARDINAL, into a huge unsigned size.
+     */
+    if (margin < 0 || 2 * margin >= WINW - 400 || 2 * margin >= WINH - 300)
+    {
+        margin = 40;
+    }
     int scr, nvi, i, j, steps = 0, warm;
     long tasks, done = 0;
     double start, mstart;

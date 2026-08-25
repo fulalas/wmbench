@@ -133,8 +133,10 @@ static unsigned char *covered_mask (Display *d, Window root, int w, int h)
 /*
  * How much of the desktop on file the image in hand does not match, as a
  * percentage of the pixels that are desktop in both, with the first and last
- * row that differ. Negative when the file cannot be read or is of another
- * screen; *open is how much of the screen was judged at all.
+ * row that differ. -1 when the file cannot be read or is of another screen,
+ * -2 when the file was fine and the windows left no desktop pixel to judge;
+ * the two are different answers and the caller has to tell them apart.
+ * *open is how much of the screen was judged at all.
  */
 static double compare_ppm (const char *path, XImage *img,
                            const unsigned char *mask, double *open,
@@ -205,7 +207,7 @@ static double compare_ppm (const char *path, XImage *img,
     fclose (f);
     *open = 100.0 * (double) seen / ((double) w * h);
 
-    return seen ? 100.0 * (double) bad / (double) seen : -1;
+    return seen ? 100.0 * (double) bad / (double) seen : -2;
 }
 
 int main (int argc, char **argv)
@@ -213,10 +215,10 @@ int main (int argc, char **argv)
     Display *d;
     Window root;
     XWindowAttributes wa;
-    XImage *img;
-    unsigned char *mask;
+    XImage *img = NULL;
+    unsigned char *mask = NULL;
     double pc, open;
-    int y0, y1;
+    int y0, y1, rc;
 
     if (argc < 3 || (strcmp (argv[1], "save") != 0 &&
                      strcmp (argv[1], "check") != 0))
@@ -239,18 +241,15 @@ int main (int argc, char **argv)
     if (img == NULL)
     {
         fprintf (stderr, "the screen cannot be photographed\n");
-        XCloseDisplay (d);
-
-        return 2;
+        rc = 2;
+        goto out;
     }
     /* The windows as they are now: what is under them is nobody's business */
     mask = covered_mask (d, root, wa.width, wa.height);
     if (mask == NULL)
     {
-        XDestroyImage (img);
-        XCloseDisplay (d);
-
-        return 2;
+        rc = 2;
+        goto out;
     }
 
     if (strcmp (argv[1], "save") == 0)
@@ -258,8 +257,8 @@ int main (int argc, char **argv)
         if (!capture_write_ppm (argv[2], img))
         {
             fprintf (stderr, "cannot write %s\n", argv[2]);
-
-            return 2;
+            rc = 2;
+            goto out;
         }
         XDestroyImage (img);
 
@@ -269,51 +268,75 @@ int main (int argc, char **argv)
         if (img == NULL)
         {
             fprintf (stderr, "the screen cannot be photographed\n");
-
-            return 2;
+            rc = 2;
+            goto out;
         }
         pc = compare_ppm (argv[2], img, mask, &open, &y0, &y1);
-        if (pc < 0 || open < MIN_OPEN)
+        if (pc == -2 || open < MIN_OPEN)
         {
             printf ("the desktop is covered (%.0f%% of the screen is left), "
                     "so leftovers on it cannot be seen\n", open);
-
-            return 3;
+            rc = 3;
+            goto out;
+        }
+        if (pc < 0)
+        {
+            fprintf (stderr, "the photograph just saved cannot be read back\n");
+            rc = 2;
+            goto out;
         }
         if (pc > IDLE_PC)
         {
             printf ("the desktop was busy on its own (%.2f%% of it changed "
                     "between two photographs a second apart)\n", pc);
-
-            return 3;
+            rc = 3;
+            goto out;
         }
-
-        return 0;
+        rc = 0;
+        goto out;
     }
 
     pc = compare_ppm (argv[2], img, mask, &open, &y0, &y1);
+    /* Nothing judged is nothing to compare, which the file above calls 3, and
+       is not the same as a photograph that cannot be used at all */
+    if (pc == -2)
+    {
+        printf ("the desktop is covered (%.0f%% of the screen is left), "
+                "so leftovers on it cannot be seen\n", open);
+        rc = 3;
+        goto out;
+    }
     if (pc < 0)
     {
         fprintf (stderr, "no usable photograph of the screen before the load\n");
-
-        return 2;
+        rc = 2;
+        goto out;
     }
     if (open < MIN_OPEN)
     {
         printf ("the desktop is covered (%.0f%% of the screen is left), "
                 "so leftovers on it cannot be seen\n", open);
-
-        return 3;
+        rc = 3;
+        goto out;
     }
     if (pc > BAD_PC)
     {
         printf ("%.2f%% of the desktop did not come back after the load, "
                 "rows %d to %d\n", pc, y0, y1);
-
-        return 1;
+        rc = 1;
+        goto out;
     }
     printf ("the desktop came back (%.2f%% differs, %.0f%% of the screen "
             "judged)\n", pc, open);
+    rc = 0;
 
-    return 0;
+out:
+    free (mask);
+    if (img != NULL)
+    {
+        XDestroyImage (img);
+    }
+    XCloseDisplay (d);
+
+    return rc;
 }

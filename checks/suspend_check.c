@@ -144,6 +144,11 @@ int main (int argc, char **argv)
 
     for (r = 0; r < rounds; r++)
     {
+        /* A round either answered or it did not; it cannot fail to answer
+           twice, and counting it twice would spend two of the rounds the
+           verdict below weighs against. */
+        int unproven = 0;
+
         for (y = 0; y < WINH; y += BAND)
         {
             XSetForeground (d, gc, palette[band_of (y)]);
@@ -222,7 +227,7 @@ int main (int argc, char **argv)
         {
             printf ("round %d: contents survived, so compositing never "
                     "suspended and this round proves nothing\n", r + 1);
-            inconclusive++;
+            unproven = 1;
         }
 
         /* Now redraw: does what the client draws after the resume get through? */
@@ -242,12 +247,13 @@ int main (int argc, char **argv)
             case -1:
                 printf ("round %d: the capture failed, so this round proves "
                         "nothing\n", r + 1);
-                inconclusive++;
+                unproven = 1;
                 break;
             default:
                 bad++;
                 printf ("round %d: the screen did not come back\n", r + 1);
         }
+        inconclusive += unproven;
     }
 
     XDestroyWindow (d, win);

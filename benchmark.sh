@@ -250,7 +250,10 @@ FPS=""; FS=""; FS_ASK=""; STRESS=""; LOADFAIL=""
 
 # The live line goes to the terminal itself, not through the file: the run can
 # be watched, and what is saved is only the finished rows.
-exec 3>/dev/tty 2>/dev/null || exec 3>/dev/null
+# The braces matter: a bare exec applies every redirection to the shell itself,
+# so the silence meant for a failed open would swallow this run's own errors,
+# which tee_report has just pointed at the result file.
+{ exec 3>/dev/tty; } 2>/dev/null || exec 3>/dev/null
 running () {                    # $1 the name of the test now under way
     printf '\033[2K%s (running...)\r' "$1" >&3
 }
@@ -374,8 +377,13 @@ if want stress; then
     [ "${STRESS_LATE:-0}" = 1 ] && STACK_OK=0
     : > "$GO"
 
-    for l in "${SL[@]}"; do
-        while ! grep -q MEASURE-START "$l" 2>/dev/null; do sleep 0.1; done
+    for i in "${!SL[@]}"; do
+        while ! grep -q MEASURE-START "${SL[$i]}" 2>/dev/null; do
+            # A load that died before the gate would never write it, and the
+            # loop below is what turns that into a failed row
+            kill -0 "${SP[$i]}" 2>/dev/null || break
+            sleep 0.1
+        done
     done
     T0=$(now_s); C0=$(comp_cpu); power_begin
     OK=1; LEFT=${#SL[@]}
@@ -413,6 +421,10 @@ if want stress; then
                      -v t0="$T0" -v t1="$T1" \
                      'BEGIN{printf "%s %s %.1f", w, c, t1 - t0}')
     else
+        # The window was opened before the loop. Left open, the sensor's own
+        # background sampler keeps running through the test that follows and
+        # the next power_begin loses the handle on it.
+        power_end > /dev/null
         LOADFAIL="$LOADFAIL stress"
     fi
     # A load in the mix whose window never moved leaves the whole scene
@@ -437,11 +449,9 @@ fi
 
 # Last of all, the only timed test: how many frames the session can deliver
 # flat out. Nothing else is read from it, so no power or CPU time.
-# Three runs, because a fullscreen window is where a compositor can step out
-# of the way: windowed, then fullscreen, then fullscreen asking to be left
-# alone with _NET_WM_BYPASS_COMPOSITOR, which is what a player sets. The
-# three together say whether this desktop stops compositing for a fullscreen
-# window at all, and whether it honours being asked.
+# One run, windowed. What a fullscreen window is worth, and whether being
+# asked with _NET_WM_BYPASS_COMPOSITOR is honoured, is the fullscreen pair
+# above, which is measured in power rather than frames.
 if want uncapped; then
     speed_run () {              # $1 log name, $2... fsbench2 arguments
         local log=$1

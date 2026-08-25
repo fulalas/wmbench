@@ -91,7 +91,7 @@ static int fixed;               /* a fixed number of passes, not a clock */
 static int doc_px;              /* how far it is scrolled, in pixels */
 static double pace;
 static double run_start, run_seconds;   /* the clock, when there is one */
-static Atom net_state, state_max_h, state_max_v, state_fs, net_moveresize_atom;
+static Atom net_state, state_max_h, state_max_v, state_fs;
 static const char *ckdir;
 static FILE *manifest;
 static int cknum;
@@ -197,6 +197,17 @@ static void checkpoint_of (Window w, const char *name,
     if (ry < 0) ry = 0;
     if (aw > sw - rx) aw = sw - rx;
     if (ah > sh - ry) ah = sh - ry;
+    /*
+     * A window the WM left past the right or bottom edge clamps to nothing.
+     * The count still moves on, so the numbering keeps step with the manifest
+     * line written above.
+     */
+    if (aw <= 0 || ah <= 0)
+    {
+        cknum++;
+
+        return;
+    }
     img = capture_region (d, root, rx, ry, (unsigned) aw, (unsigned) ah);
     if (img != NULL)
     {
@@ -1146,16 +1157,22 @@ int main (int argc, char **argv)
         winw = stage_w;
     }
     base_y = stage_y + 200;             /* room above for a drag upwards */
-    if (winh > stage_y + stage_h - base_y)
+    /*
+     * Two thirds of what is left below, not all of it. The stage is at most
+     * 840 high, so all of it is always less than WINH and the window would
+     * start out already touching the bottom of the stage - and then the
+     * resize phase, which grows downwards from here, has nothing to grow
+     * into: the bottom edge leg resizes to the size it already has.
+     */
+    if (winh > (stage_y + stage_h - base_y) * 2 / 3)
     {
-        winh = stage_y + stage_h - base_y;
+        winh = (stage_y + stage_h - base_y) * 2 / 3;
     }
     base_x = stage_x + (stage_w - winw) / 2;
     net_state = XInternAtom (d, "_NET_WM_STATE", False);
     state_max_h = XInternAtom (d, "_NET_WM_STATE_MAXIMIZED_HORZ", False);
     state_max_v = XInternAtom (d, "_NET_WM_STATE_MAXIMIZED_VERT", False);
     state_fs = XInternAtom (d, "_NET_WM_STATE_FULLSCREEN", False);
-    net_moveresize_atom = XInternAtom (d, "_NET_MOVERESIZE_WINDOW", False);
 
     wb = make_window (base_x + 80, stage_y + 40, "usagebench B");
     wa = make_window (base_x, base_y, "usagebench A");
@@ -1363,7 +1380,12 @@ int main (int argc, char **argv)
     {
         XFreePixmap (d, bands_buf);
     }
+    if (bands_buf_b != None)
+    {
+        XFreePixmap (d, bands_buf_b);
+    }
     XFreePixmap (d, doc_buf);
+    XFreeGC (d, gc);
     XDestroyWindow (d, wa);
     XDestroyWindow (d, wb);
     XCloseDisplay (d);

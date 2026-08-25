@@ -1,8 +1,9 @@
 /*
- * Translucency. Every other benchmark here uses opaque windows, and the
- * profiles confirm it: zero shadows drawn, nothing blended. Yet a translucent terminal over a busy window is one of the
- * commonest things on a real desktop, and it is the case where the compositor
- * cannot just copy: it has to read what is underneath and blend.
+ * Translucency. Nothing else here asks the compositor to blend a whole
+ * managed window uniformly: argbbench hands it per-pixel alpha and popbench
+ * hands it shadows. Yet a translucent terminal over a busy window is one of
+ * the commonest things on a real desktop, and it is the case where the
+ * compositor cannot just copy: it has to read what is underneath and blend.
  *
  * A detailed opaque window sits underneath. A second window on top carries
  * _NET_WM_WINDOW_OPACITY and redraws at a fixed rate, so every step forces the
@@ -89,6 +90,15 @@ int main (int argc, char **argv)
     double alpha = (argc > 2) ? atof (argv[2]) : 0.75;
     double rate = (argc > 3) ? atof (argv[3]) : 120.0;
 
+    /* A 32-bit CARDINAL: out of range it would wrap rather than saturate */
+    if (alpha < 0.0)
+    {
+        alpha = 0.0;
+    }
+    if (alpha > 1.0)
+    {
+        alpha = 1.0;
+    }
     if (rate <= 0.0)
     {
         rate = 120.0;

@@ -77,9 +77,8 @@ int main (int argc, char **argv)
     Window win, root;
     GC gc;
     XImage *img;
-    XWindowAttributes wa;
     int scr, want = (argc > 1) ? atoi (argv[1]) : 0;
-    int captures = 0, clean = 0, torn = 0, unknown = 0;
+    int captures = 0, clean = 0, torn = 0, unknown = 0, nocapture = 0;
     int offset = 0, i, x, y, ox, oy;
     double limit, t0, pace, due;
 
@@ -120,7 +119,6 @@ int main (int argc, char **argv)
     {
         Window child;
 
-        XGetWindowAttributes (d, win, &wa);
         XTranslateCoordinates (d, win, root, 0, 0, &ox, &oy, &child);
     }
 
@@ -169,6 +167,7 @@ int main (int argc, char **argv)
         if (img == NULL)
         {
             fprintf (stderr, "capture failed\n");
+            nocapture++;
             break;
         }
         captures++;
@@ -249,6 +248,12 @@ int main (int argc, char **argv)
     if (torn > 0)
     {
         return 1;
+    }
+    /* Not one photograph of the screen: this check could not look, which is
+       not the same answer as tearing. See validate.sh. */
+    if (captures == 0 && nocapture > 0)
+    {
+        return 2;
     }
     /* Nothing but somebody else's pixels: covered the whole time, in the
        stress mix most likely, and no answer either way. See validate.sh. */

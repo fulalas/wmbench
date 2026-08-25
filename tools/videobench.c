@@ -140,6 +140,7 @@ int main (int argc, char **argv)
     if (shm.shmaddr == (void *) -1)
     {
         fprintf (stderr, "shmat failed\n");
+        shmctl (shm.shmid, IPC_RMID, NULL);
 
         return 2;
     }
@@ -148,10 +149,20 @@ int main (int argc, char **argv)
     if (!XShmAttach (d, &shm))
     {
         fprintf (stderr, "XShmAttach failed\n");
+        shmdt (shm.shmaddr);
+        shmctl (shm.shmid, IPC_RMID, NULL);
 
         return 2;
     }
     XSync (d, False);
+    /*
+     * Marked for removal now the server has it, since the sync above has
+     * already carried the attach there: the kernel frees the segment when the
+     * last attach goes away, so nothing this program can die of - benchmark.sh
+     * kills the whole process group on Ctrl-C - leaves 8 MB behind for the
+     * lifetime of the machine.
+     */
+    shmctl (shm.shmid, IPC_RMID, NULL);
 
     tasks = bench_tasks ();
     warm = (tasks > 0) ? 10 : 0;
@@ -229,7 +240,6 @@ int main (int argc, char **argv)
     XShmDetach (d, &shm);
     XDestroyImage (img);
     shmdt (shm.shmaddr);
-    shmctl (shm.shmid, IPC_RMID, NULL);
     XDestroyWindow (d, win);
     XCloseDisplay (d);
 

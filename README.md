@@ -21,8 +21,13 @@ Every workload does a **fixed amount of work**, so two sessions compare
 directly and the time it took is a result rather than a setting.
 
 The exception is the frame rate, which is deliberately flat out and reports
-only frames a second. It runs three times: windowed, fullscreen, and
-fullscreen asking compositing to step aside with `_NET_WM_BYPASS_COMPOSITOR`.
+only frames a second. It runs once, windowed, and last.
+
+What leaving a window out of compositing is worth is measured separately: the
+same fixed number of frames in a fullscreen window, twice - as it comes, and
+asking compositing to step aside with `_NET_WM_BYPASS_COMPOSITOR`. That pair
+is read in power, not frames, because the saving is the compositor's work and
+not the application's.
 
 No workload repeats work another one does: the scripted person is split into
 `windows` (maximize, minimize, snap, raise, fullscreen) and `scroll`, next to
@@ -57,8 +62,9 @@ Each test answers with one of four statuses, which is what the report prints:
 display, no way to photograph the screen) and **not available** (the compositor
 does not do the thing being tested, so nothing was proved either way).
 
-On Wayland a screenshot tool is required (`grim`, `gnome-screenshot` or
-`spectacle`), otherwise the pixel tests are skipped.
+On Wayland a screenshot tool is required: `grim`, or `gnome-screenshot` or
+`spectacle` together with `ffmpeg`, which converts their PNG. Without one the
+pixel tests are skipped.
 
 | test | the defect it catches |
 | --- | --- |

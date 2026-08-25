@@ -244,9 +244,19 @@ power_begin () {
     fi
 }
 
+# Read with builtins alone: this runs ten times a second inside the window
+# being measured, and a fork there would show up in the very figures it is
+# taking. A read that fails is no sample, not a zero: counting it would drag
+# the average down as if the machine had drawn nothing for a tenth of a second.
 power_sample () {
+    local v
+
     [ -n "$POWER_HWMON" ] || return 0
-    POWER_SUM=$((POWER_SUM + $(cat "$POWER_HWMON" 2>/dev/null || echo 0)))
+    # stderr is redirected first on purpose: the other way round the shell has
+    # not silenced it yet when the open fails, and says so ten times a second
+    read -r v 2>/dev/null < "$POWER_HWMON" || return 0
+    [ -n "$v" ] || return 0
+    POWER_SUM=$((POWER_SUM + v))
     POWER_N=$((POWER_N + 1))
 }
 
@@ -273,36 +283,16 @@ power_end () {
         -v t0="$POWER_T0" -v t1="$t1" 'BEGIN{
             w = (n ? s / n / 1e6 : 0) + nv;
             if (t1 > t0) {
-                # A counter that wrapped, which these do, is not a rise
-                if (c1 != "" && c1 >= c0) w += (c1 - c0) / (t1 - t0) / 1e6;
-                if (g1 != "" && g1 >= g0) w += (g1 - g0) / (t1 - t0) / 1e6;
+                # A counter that wrapped, which these do, is not a rise, and
+                # a window missing either end is not a window: without the
+                # opening reading the whole counter, joules since boot, would
+                # be charged to it
+                if (c0 != "" && c1 != "" && c1 >= c0)
+                    w += (c1 - c0) / (t1 - t0) / 1e6;
+                if (g0 != "" && g1 != "" && g1 >= g0)
+                    w += (g1 - g0) / (t1 - t0) / 1e6;
             }
             printf "%.2f", w }'
-}
-
-# Average package power over $1 seconds into file $2, in the background, after
-# skipping $3 seconds (default none).
-#
-# Skip whenever the watcher is started alongside the benchmark rather than after
-# it. A benchmark's power ramps over about four seconds while it creates its
-# window, builds a GL context and compiles shaders, measured here as 9.1 W in the
-# first second, 13.1 in the second, 18.5 over the next two and 20.2 settled.
-# Averaging that in drags a 14 s window from 20.2 W down to 18.6. Both arms of a
-# comparison ramp the same way, so it does not reverse a result, but it dilutes
-# the difference between them by roughly the fraction of the window the ramp
-# occupies, which makes every margin measured that way an understatement.
-#
-# Wait for $PW afterwards, never a bare wait: that would also wait for the
-# window manager these scripts start, which never exits.
-pwr_watch () {
-    ( if [ "${3:-0}" -gt 0 ]; then sleep "$3"; fi
-      power_begin
-      end=$((SECONDS + $1))
-      while [ $SECONDS -lt $end ]; do
-          power_sample; sleep 0.1
-      done
-      power_end > "$2" ) &
-    PW=$!
 }
 
 # The AMD card's sysfs device directory, found by driver name, never by index:
@@ -337,8 +327,6 @@ wm_cpu () {
     [ -n "$ticks" ] && echo $((ticks * 10))
 }
 
-all_cpu () { awk '/^cpu /{print ($2+$3+$4+$6+$7+$8) * 1000 / 100}' /proc/stat; }
-
 # The version of the running window manager, asked of the running binary
 # itself (/proc/pid/exe, so a locally built one answers for itself), or of
 # the binary by name when the process is not visible. Empty when nothing says.
@@ -356,7 +344,7 @@ wm_version () {
 # only shows the scaled-down logical view, not the panel. On X11 the mode
 # comes from xrandr and the scale from the font DPI (96 = 1.0).
 display_info () {
-    local res="" scale="" dpi out tool
+    local res="" scale="" dpi out tool cur hz
 
     if [ "$(session_type)" = wayland ]; then
         for tool in "wlr-randr" "cosmic-randr list" "kscreen-doctor -o"; do
@@ -562,36 +550,13 @@ detect_wm () {
         WM_PIDS="$WM_PID $(pgrep -x "$helpers" | tr '\n' ' ')"
     fi
 
-    # On X11 a good part of compositing happens inside the X server: it owns
-    # the windows' pixmaps and hands them over, and the window manager's own
-    # process never sees that time. Counting the server too is what makes the
-    # CPU column mean the same thing as it does on Wayland, where there is no
-    # server to count. On Wayland Xwayland is left out: nothing here runs
-    # through it unless the session itself does.
-    X_PIDS=""
-    if [ "$(session_type)" = x11 ]; then
-        X_PIDS=$(pgrep -x 'Xorg|X|Xephyr' | tr '\n' ' ')
-    fi
-
     [ -n "$WM_NAME" ]
-}
-
-# The X server's CPU, in the same milliseconds wm_cpu reports, or empty where
-# there is no server of ours to read
-x_cpu () {
-    local p f ticks=""
-    for p in ${X_PIDS:-}; do
-        read -r -a f < "/proc/$p/stat" 2>/dev/null || continue
-        [ -n "${f[13]:-}" ] || continue
-        ticks=$(( ${ticks:-0} + f[13] + f[14] ))
-    done
-    [ -n "$ticks" ] && echo $((ticks * 10))
 }
 
 # A command that writes a full-screen PPM to the path it is given, for the
 # checks to photograph a Wayland screen with. Prints it, or fails.
 pick_capture_cmd () {
-    local helper="$(dirname "${BASH_SOURCE[0]}")/capture_ppm.sh"
+    local t helper="$(dirname "${BASH_SOURCE[0]}")/capture_ppm.sh"
 
     if command -v grim >/dev/null; then
         echo "grim -t ppm"

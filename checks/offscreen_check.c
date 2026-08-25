@@ -7,11 +7,17 @@
  * classic place for an off-by-a-region error. Get it wrong and the visible part
  * of the window shows the wrong part of its contents, shifted.
  *
- * A band pattern whose colour depends only on the row makes that visible. With
- * the window at y = -OFFY, the top of the screen must show the band belonging to
- * window row OFFY, not the one belonging to row 0.
+ * A pattern of square cells whose colour depends on the column and the row
+ * together makes that visible, and in both directions: a pattern of rows alone
+ * says nothing about the left edge, since sliding it sideways lands on exactly
+ * the same colours. With the window at -OFFX,-OFFY, the top left of the screen
+ * must show the cell belonging to window pixel OFFX,OFFY, not the one
+ * belonging to 0,0.
  *
  *   offscreen_check [rounds]
+ *
+ * Exit status: 0 the right part was visible, 1 the wrong one was, 2 it could
+ * not run, 3 something covered the corner throughout and nothing was proved.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,9 +39,9 @@ static const unsigned long palette[NCOL] = {
     0xff00ff, 0x00ffff, 0xffffff, 0x808080
 };
 
-static int band_of (int win_y)
+static int cell_of (int win_x, int win_y)
 {
-    return (win_y / BAND) % NCOL;
+    return ((win_x / BAND) + (win_y / BAND)) % NCOL;
 }
 
 static int colour_index (unsigned long pixel)
@@ -61,7 +67,7 @@ int main (int argc, char **argv)
     XSetWindowAttributes swa;
     XImage *img;
     int scr, rounds = (argc > 1) ? atoi (argv[1]) : 3;
-    int r, x, y, ok = 0, bad = 0;
+    int r, x, y, ok = 0, bad = 0, blind = 0;
 
     d = XOpenDisplay (NULL);
     if (d == NULL)
@@ -87,12 +93,15 @@ int main (int argc, char **argv)
 
     for (r = 0; r < rounds; r++)
     {
-        int wrong = -1;
+        int wrong = -1, seen = 0;
 
         for (y = 0; y < WINH; y += BAND)
         {
-            XSetForeground (d, gc, palette[band_of (y)]);
-            XFillRectangle (d, win, gc, 0, y, WINW, BAND);
+            for (x = 0; x < WINW; x += BAND)
+            {
+                XSetForeground (d, gc, palette[cell_of (x, y)]);
+                XFillRectangle (d, win, gc, x, y, BAND, BAND);
+            }
         }
         XSync (d, False);
         usleep (500000);
@@ -114,34 +123,65 @@ int main (int argc, char **argv)
             for (x = 0; x < 4; x++)
             {
                 int cx = (img->width / 5) * (x + 1);
+                int idx = colour_index (XGetPixel (img, cx, y));
 
-                /* screen row y + 4 is window row OFFY + y + 4 */
-                if (colour_index (XGetPixel (img, cx, y)) !=
-                    band_of (OFFY + y + 4))
+                /*
+                 * No colour of the pattern at all, so this pixel is not ours:
+                 * the corner sampled here is where panels, docks and tray
+                 * popups live, and nothing owns the stacking after the first
+                 * map. Somebody else's window says nothing about this one
+                 * either way, and counting it would score a panel as a
+                 * compositor fault.
+                 */
+                if (idx < 0)
+                {
+                    continue;
+                }
+                /* screen 4 + cx, 4 + y is window OFFX + 4 + cx, OFFY + 4 + y */
+                if (idx != cell_of (OFFX + cx + 4, OFFY + y + 4))
                 {
                     wrong = y;
                     break;
                 }
+                seen++;
             }
         }
         XDestroyImage (img);
 
-        if (wrong < 0)
-        {
-            ok++;
-        }
-        else
+        if (wrong >= 0)
         {
             bad++;
             printf ("round %d: wrong part of the window visible, from row %d\n",
                     r + 1, wrong);
+        }
+        else if (seen == 0)
+        {
+            blind++;
+            printf ("round %d: something is covering the window, "
+                    "nothing proved\n", r + 1);
+        }
+        else
+        {
+            ok++;
         }
     }
 
     XDestroyWindow (d, win);
     XCloseDisplay (d);
 
-    printf ("off-screen window: %d clean, %d wrong\n", ok, bad);
+    printf ("off-screen window: %d clean, %d wrong, %d proved nothing\n",
+            ok, bad, blind);
 
-    return (bad == 0 && ok > 0) ? 0 : 1;
+    if (bad > 0)
+    {
+        return 1;
+    }
+    /* Covered in every round, so every capture was somebody else's pixels: no
+       answer either way, which is not the same as a fault. See the README. */
+    if (ok == 0)
+    {
+        return (blind > 0) ? 3 : 1;
+    }
+
+    return 0;
 }

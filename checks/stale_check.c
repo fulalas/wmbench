@@ -126,12 +126,16 @@ int main (int argc, char **argv)
     /*
      * Without position hints the window manager places these itself, and it
      * happily puts the noise window on top of the pattern one, at which point
-     * the capture is of the wrong window and everything looks stale.
+     * the capture is of the wrong window and everything looks stale. The size
+     * is asked for the same way and for the same reason: every capture below
+     * reads a fixed WINW x WINH region, so a window the manager resized is
+     * photographed along with whatever is beside it, which reads as stale.
      */
     {
         XSizeHints h;
 
-        h.flags = USPosition | USSize | PPosition | PSize;
+        h.flags = USPosition | USSize | PPosition | PSize |
+                  PMinSize | PMaxSize;
         h.width = h.min_width = h.max_width = WINW;
         h.height = h.min_height = h.max_height = WINH;
         h.x = 100; h.y = 100;
@@ -233,20 +237,23 @@ int main (int argc, char **argv)
 
         img = capture_region (d, root, ox + MARGIN, oy + MARGIN,
                          WINW - 2 * MARGIN, WINH - 2 * MARGIN);
-        if (img != NULL)
+        if (img == NULL)
         {
-            if (matches (img, offset, &bad))
-            {
-                stale_ok++;
-            }
-            else
-            {
-                stale_bad++;
-                printf ("round %d: window went stale from row %d\n",
-                        r + 1, bad);
-            }
-            XDestroyImage (img);
+            fprintf (stderr, "capture failed\n");
+
+            return 2;
         }
+        if (matches (img, offset, &bad))
+        {
+            stale_ok++;
+        }
+        else
+        {
+            stale_bad++;
+            printf ("round %d: window went stale from row %d\n",
+                    r + 1, bad);
+        }
+        XDestroyImage (img);
     }
 
 

@@ -9,3 +9,7 @@ results/
 *.log
 *.ppm
 va-*.txt
+*-stress.go
+
+# local tool settings, per machine
+.claude/settings.local.json

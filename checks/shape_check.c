@@ -63,6 +63,7 @@ int main (int argc, char **argv)
     GC gc;
     XImage *img;
     XRectangle band;
+    XWindowAttributes bga, fga;
     int scr, ev, err, rounds = (argc > 1) ? atoi (argv[1]) : 2;
     int r, y, bx, by, fx, fy, ok = 0, bad = 0;
 
@@ -101,6 +102,25 @@ int main (int argc, char **argv)
 
     XTranslateCoordinates (d, bg, root, 0, 0, &bx, &by, &child);
     XTranslateCoordinates (d, fg, root, 0, 0, &fx, &fy, &child);
+
+    /*
+     * The size was asked for with USSize, which is a hint and not a promise: a
+     * manager that gives either window a size of its own choosing is within
+     * its rights. Every sample point below is a fixed one in the size that was
+     * asked for, so on a different size they land outside the window and read
+     * the wrong colour, which would be reported as a shape the compositor drew
+     * wrong. Say what happened instead of blaming it for that.
+     */
+    if (!XGetWindowAttributes (d, bg, &bga) ||
+        !XGetWindowAttributes (d, fg, &fga) ||
+        bga.width != BGW || bga.height != BGH ||
+        fga.width != FGW || fga.height != FGH)
+    {
+        printf ("the windows are not the size they asked for, "
+                "so this would prove nothing\n");
+
+        return 2;
+    }
 
     if (fx < bx || fy < by ||
         fx + FGW > bx + BGW || fy + FGH > by + BGH)

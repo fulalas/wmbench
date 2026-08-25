@@ -31,20 +31,29 @@ fi
 
 awk -v B="$B" -v O="$O" '
 # benchmark-<date>-<time>-<host>-<de>-<wm>-<version>-<session>.txt, and older
-# files without a version
-function key_of(path,    n, p, f, q, de, wm) {
+# files without a version. Only the tail can be counted from the end: the
+# window manager name and the version have their dashes taken out where they
+# are built, but the desktop has colons, slashes and spaces turned into dashes,
+# so ubuntu:GNOME arrives here as ubuntu-gnome and is not one field. It is
+# whatever lies between the fixed benchmark-<date>-<time>-<host>- head and the
+# tail.
+function key_of(path,    n, p, f, q, de, wm, i, last) {
     n = split (path, p, "/");
     f = p[n];
     sub (/\.txt$/, "", f);
     n = split (f, q, "-");
-    if (q[n - 1] ~ /^[0-9]/)
+    # A version is a number, or the literal "unknown" benchmark.sh writes when
+    # nothing tells it one
+    if (q[n - 1] ~ /^[0-9]/ || q[n - 1] == "unknown")
     {
-        de = q[n - 3]; wm = q[n - 2];
+        wm = q[n - 2]; last = n - 3;
     }
     else
     {
-        de = q[n - 2]; wm = q[n - 1];
+        wm = q[n - 1]; last = n - 2;
     }
+    de = q[5];
+    for (i = 6; i <= last; i++) de = de "-" q[i];
     kk = de "/" wm "/" q[n];
     # The three parts go one above the other: on one line the header alone is
     # wider than the numbers under it, and the table wraps

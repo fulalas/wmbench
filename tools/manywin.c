@@ -18,6 +18,7 @@
  */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <unistd.h>
 #include <X11/Xlib.h>
@@ -33,6 +34,7 @@ int main (int argc, char **argv)
 {
     Display *d;
     Window *wins;
+    Pixmap pat[6];
     GC gc;
     Atom wtype, normal;
     int count = (argc > 1) ? atoi (argv[1]) : 20;
@@ -73,6 +75,30 @@ int main (int argc, char **argv)
     wtype = XInternAtom (d, "_NET_WM_WINDOW_TYPE", False);
     normal = XInternAtom (d, "_NET_WM_WINDOW_TYPE_NORMAL", False);
 
+    /*
+     * The content is the windows' background rather than something painted
+     * once after mapping. Nothing here listens for Expose, and these windows
+     * are scenery other benchmarks move over - stress_start() walks two
+     * windows across them - so a strip that is uncovered gets filled from the
+     * background: painted once it would come back black and stay black,
+     * wherever nothing composites and keeps the contents for us. The pattern
+     * only depends on i % 6, so six of them cover any number of windows.
+     */
+    gc = XCreateGC (d, RootWindow (d, scr), 0, NULL);
+    for (i = 0; i < 6; i++)
+    {
+        pat[i] = XCreatePixmap (d, RootWindow (d, scr), WINW, WINH,
+                                (unsigned) DefaultDepth (d, scr));
+        XSetForeground (d, gc, BlackPixel (d, scr));
+        XFillRectangle (d, pat[i], gc, 0, 0, WINW, WINH);
+        for (j = 0; j < 24; j++)
+        {
+            XSetForeground (d, gc, colours[(i + j) % 6]);
+            XFillRectangle (d, pat[i], gc, (j * 31) % (WINW - 70),
+                            (j * 43) % (WINH - 50), 70, 50);
+        }
+    }
+
     for (i = 0; i < count; i++)
     {
         XSizeHints hints;
@@ -91,6 +117,13 @@ int main (int argc, char **argv)
         wins[i] = XCreateSimpleWindow (d, RootWindow (d, scr), x, y,
                                        WINW, WINH, 0, BlackPixel (d, scr),
                                        BlackPixel (d, scr));
+        XSetWindowBackgroundPixmap (d, wins[i], pat[i % 6]);
+        /*
+         * Cleared first: only the flags below are set, but the whole struct
+         * still travels to the window manager, and whatever the stack held
+         * reads as a minimum size, a size step or an aspect ratio.
+         */
+        memset (&hints, 0, sizeof hints);
         hints.flags = USPosition | USSize | PPosition | PSize;
         hints.x = x; hints.y = y;
         hints.width = WINW; hints.height = WINH;
@@ -103,18 +136,6 @@ int main (int argc, char **argv)
     XSync (d, False);
     sleep (3);
     bench_placed (d, wins[0], sx, sy, "manywin");
-
-    gc = XCreateGC (d, wins[0], 0, NULL);
-    for (i = 0; i < count; i++)
-    {
-        for (j = 0; j < 24; j++)
-        {
-            XSetForeground (d, gc, colours[(i + j) % 6]);
-            XFillRectangle (d, wins[i], gc, (j * 31) % (WINW - 70),
-                            (j * 43) % (WINH - 50), 70, 50);
-        }
-    }
-    XSync (d, False);
 
     printf ("READY %d windows\n", count);
     fflush (stdout);
@@ -133,6 +154,10 @@ int main (int argc, char **argv)
     for (i = 0; i < count; i++)
     {
         XDestroyWindow (d, wins[i]);
+    }
+    for (i = 0; i < 6; i++)
+    {
+        XFreePixmap (d, pat[i]);
     }
     XCloseDisplay (d);
     free (wins);

@@ -76,6 +76,7 @@ int main (int argc, char **argv)
     int managed = (argc > 2 && !strcmp (argv[2], "managed"));
     int s, i, x, y, px, py, offset = 0;
     int clean = 0, incoherent = 0, foreign = 0, edge_bad = 0, blind = 0;
+    int no_capture = 0;
 
     d = XOpenDisplay (NULL);
     if (d == NULL)
@@ -120,7 +121,8 @@ int main (int argc, char **argv)
     {
         int w = BASEW + ((s % 2) ? GROW : 0);
         int h = BASEH + ((s % 2) ? GROW / 2 : 0);
-        int start, j, fits = -1;
+        int start, j, fits = -1, covered = 0;
+        int iw, ih;
 
         XResizeWindow (d, win, w, h);
         XRaiseWindow (d, win);
@@ -158,16 +160,25 @@ int main (int argc, char **argv)
 
         /*
          * A region inside the smallest size the window ever takes, so it is
-         * window whichever size is currently on screen. That is what makes
-         * this usable while the compositor lags the server under load: there
-         * is no moment when the captured area is not the window. Capturing
-         * the full current size instead reads as a defect every time the
-         * compositor is one frame behind, which under load is 20% of resizes.
+         * inside the window whichever size is currently on screen. That is
+         * what makes this usable while the compositor lags the server under
+         * load: there is no moment when the captured area is not the window.
+         * Capturing the full current size instead reads as a defect every time
+         * the compositor is one frame behind, which under load is 20% of
+         * resizes. Nothing tells a manager how big the window has to be, so in
+         * managed mode the smallest size is whatever it granted, not BASEW.
          */
-        img = capture_region (d, root, px + INSET, py + INSET,
-                         BASEW - 2 * INSET, BASEH - 2 * INSET);
+        iw = (w < BASEW) ? w : BASEW;
+        ih = (h < BASEH) ? h : BASEH;
+        img = NULL;
+        if (iw > 2 * INSET && ih > 2 * INSET)
+        {
+            img = capture_region (d, root, px + INSET, py + INSET,
+                             iw - 2 * INSET, ih - 2 * INSET);
+        }
         if (img == NULL)
         {
+            no_capture++;
             continue;
         }
 
@@ -249,6 +260,7 @@ int main (int argc, char **argv)
                     if (maxx - minx > (edge->width * 3) / 5 &&
                         maxy - miny > (edge->height * 3) / 5)
                     {
+                        covered = 1;
                         blind++;
                         printf ("step %d: something is covering the window, "
                                 "nothing proved\n", s);
@@ -289,11 +301,16 @@ int main (int argc, char **argv)
                 /*
                  * Not one row of ours anywhere: we are photographing another
                  * window, not a defect in this one. See the same reasoning at
-                 * the edge test below.
+                 * the edge test below. The edge test looks at the same step
+                 * and may have said so already, and one step covered is one
+                 * step that proved nothing, not two.
                  */
-                blind++;
-                printf ("step %d: something is covering the window, "
-                        "nothing proved\n", s);
+                if (!covered)
+                {
+                    blind++;
+                    printf ("step %d: something is covering the window, "
+                            "nothing proved\n", s);
+                }
             }
             else if (known < total)
             {
@@ -316,18 +333,26 @@ int main (int argc, char **argv)
     XCloseDisplay (d);
 
     printf ("resizes: %d coherent, %d mixed, %d not the pattern, "
-            "%d with a band at an edge, %d proved nothing\n",
-            clean, incoherent, foreign, edge_bad, blind);
+            "%d with a band at an edge, %d proved nothing, "
+            "%d never photographed\n",
+            clean, incoherent, foreign, edge_bad, blind, no_capture);
 
     if (incoherent > 0 || foreign > 0 || edge_bad > 0)
     {
         return 1;
     }
     /* Covered throughout, so every step was somebody else's pixels: no answer
-       either way, which is not the same as a fault. See the README. */
+       either way, which is not the same as a fault. See the README. Nothing
+       scored and no picture taken is not an answer either: the screen could
+       not be photographed at all, which is 2 and not a fault of anybody's. */
     if (clean == 0)
     {
-        return (blind > 0) ? 3 : 1;
+        if (blind > 0)
+        {
+            return 3;
+        }
+
+        return (no_capture > 0) ? 2 : 1;
     }
 
     return 0;

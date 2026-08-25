@@ -95,7 +95,7 @@ int main (int argc, char **argv)
     XSizeHints hints;
     Atom wtype, normal;
     int scr, rounds = (argc > 1) ? atoi (argv[1]) : 3;
-    int r, y, ox, oy, ok = 0, bad = 0, inconclusive = 0;
+    int r, y, ox, oy, ok = 0, bad = 0, inconclusive = 0, nocapture = 0;
 
     d = XOpenDisplay (NULL);
     if (d == NULL)
@@ -138,7 +138,15 @@ int main (int argc, char **argv)
         usleep (500000);
 
         hit = pattern_score (d, root, ox, oy, &total);
-        if (total == 0 || hit < total)
+        /* A total of zero is no photograph at all, which says nothing about
+           the pattern and has to be kept apart from a pattern that is wrong */
+        if (total == 0)
+        {
+            printf ("round %d: the screen cannot be photographed\n", r + 1);
+            nocapture++;
+            continue;
+        }
+        if (hit < total)
         {
             printf ("round %d: the pattern is not on screen to begin with "
                     "(%d of %d), so nothing can be concluded\n",
@@ -153,7 +161,17 @@ int main (int argc, char **argv)
         usleep (900000);
 
         gone_hit = pattern_score (d, root, ox, oy, &gone_total);
-        if (gone_hit == gone_total && gone_total > 0)
+        if (gone_total == 0)
+        {
+            printf ("round %d: the screen cannot be photographed after "
+                    "minimising\n", r + 1);
+            nocapture++;
+            XMapWindow (d, win);
+            XSync (d, False);
+            usleep (700000);
+            continue;
+        }
+        if (gone_hit == gone_total)
         {
             printf ("round %d: still fully there after minimising, so the "
                     "minimise did not happen and this proves nothing\n", r + 1);
@@ -181,7 +199,13 @@ int main (int argc, char **argv)
         XTranslateCoordinates (d, win, root, 0, 0, &ox, &oy, &child);
         hit = pattern_score (d, root, ox, oy, &total);
 
-        if (total > 0 && hit == total)
+        if (total == 0)
+        {
+            printf ("round %d: the screen cannot be photographed after "
+                    "restoring\n", r + 1);
+            nocapture++;
+        }
+        else if (hit == total)
         {
             ok++;
         }
@@ -203,6 +227,15 @@ int main (int argc, char **argv)
        and only when no round proved anything at all */
     if (bad > 0)
         return 1;
+    /* A round nobody could photograph is this check failing to look, not the
+       compositor failing, and validate.sh keeps the two apart */
+    if (ok == 0 && nocapture > inconclusive)
+    {
+        printf ("%d of %d rounds could not be photographed at all\n",
+                nocapture, rounds);
+
+        return 2;
+    }
     if (ok == 0)
         return (inconclusive > 0) ? 3 : 1;
 

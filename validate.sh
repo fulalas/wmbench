@@ -177,13 +177,15 @@ fi
 # The work in there is 20 s long. A load still going long after that is the
 # session stalling, which is the thing being tested here, so it is stopped and
 # reported rather than waited on for ever.
-( sleep 90; kill "${STRESS_PIDS[@]}" 2>/dev/null ) &
+# The sleep in there is a process of its own and outlives the subshell that
+# holds it, so it is kept off the report's pipe and reaped with its parent.
+( sleep 90; kill "${STRESS_PIDS[@]}" 2>/dev/null ) >/dev/null 2>&1 &
 WD=$!
 for p in "${STRESS_PIDS[@]}"; do
-    wait "$p" 2>/dev/null
-    [ "$p" = "$LP" ] && LRC=$?
+    wait "$p" 2>/dev/null; wrc=$?
+    [ "$p" = "$LP" ] && LRC=$wrc
 done
-kill $WD 2>/dev/null; wait $WD 2>/dev/null
+pkill -P "$WD" 2>/dev/null; kill $WD 2>/dev/null; wait $WD 2>/dev/null
 rm -f "$GO"
 
 kill $M 2>/dev/null; wait $M 2>/dev/null
