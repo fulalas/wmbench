@@ -8,6 +8,7 @@ be put side by side.
     ./benchmark.sh          measure the session, print a table
     ./validate.sh           look for visual defects, print a verdict
     ./compare_results.sh    put the saved runs side by side
+    ./compare_tables.sh     the same in two boxed tables, power and CPU
 
 Both entry points build what they need, work out which compositor is running,
 and save their table under `results/`. Whichever window manager is running says
