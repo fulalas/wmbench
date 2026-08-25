@@ -1,7 +1,6 @@
 #!/bin/bash
-# Put every benchmark result side by side: one column per desktop, one row per
-# workload, and notes about what the numbers can and cannot say. Runs of the
-# same desktop are averaged.
+# Put every benchmark result in four boxed tables - frame rate, energy, power
+# and compositor CPU - one column per desktop, the best of each line in bold.
 #
 #   ./compare_results.sh [folder]        default results/
 case "${1:-}" in
@@ -10,9 +9,9 @@ esac
 set -u
 DIR=${1:-$(dirname "$0")/results}
 [ -d "$DIR" ] || { echo "no such folder: $DIR"; exit 1; }
-# Only reports that carry the data block at the end can be read; a report from
-# before it existed is skipped whole rather than averaged in with no rows of its
-# own, which would mix one run's numbers with another's energy and frame rate.
+
+# Only reports carrying the data block at the end can be read; the table above
+# it in a report moves whenever the wording does.
 FILES=()
 for f in "$DIR"/benchmark-*.txt; do
     grep -q '^row: ' "$f" 2>/dev/null && FILES+=("$f")
@@ -23,208 +22,278 @@ if [ "${#FILES[@]}" = 0 ]; then
     exit 1
 fi
 
-awk '
-function key_of(path) {
-    # benchmark-<date>-<time>-<host>-<de>-<wm>-<session>.txt
+# Bold only where somebody is watching; a file has no use for escape codes
+if [ -t 1 ]; then
+    B=$'\033[1m'; O=$'\033[0m'
+else
+    B=""; O=""
+fi
+
+awk -v B="$B" -v O="$O" '
+# benchmark-<date>-<time>-<host>-<de>-<wm>-<version>-<session>.txt, and older
+# files without a version
+function key_of(path,    n, p, f, q, de, wm) {
     n = split (path, p, "/");
     f = p[n];
     sub (/\.txt$/, "", f);
     n = split (f, q, "-");
-    # ...-<de>-<wm>-<version>-<session>, and older files without a version
     if (q[n - 1] ~ /^[0-9]/)
     {
-        de = q[n - 3]; wm = q[n - 2]; ver = q[n - 1];
+        de = q[n - 3]; wm = q[n - 2];
     }
     else
     {
-        de = q[n - 2]; wm = q[n - 1]; ver = "";
+        de = q[n - 2]; wm = q[n - 1];
     }
-    sess = (q[n] == "wayland") ? "Wayland" : "X11";
-    kk = de "/" wm " " ver " " sess;
-    # the desktop and its window manager on one line, the build below
-    hdr1[kk] = de "/" wm;
-    hdr2[kk] = (ver == "") ? sess : ver " " sess;
+    kk = de "/" wm "/" q[n];
+    # The three parts go one above the other: on one line the header alone is
+    # wider than the numbers under it, and the table wraps
+    h1[kk] = de; h2[kk] = wm; h3[kk] = q[n];
 
     return kk;
 }
-# A column that could not be measured is left out of its average rather than
-# counted as a zero, which is why each one carries its own count
-function add(kk, label, w, c) {
-    if (!(label in rowseen)) { rowseen[label] = 1; rows[++nrows] = label }
-    if (w != "-") { pw[kk, label] += w; pwn[kk, label]++ }
-    if (c != "-") { cpu[kk, label] += c; cpun[kk, label]++ }
-}
-function val(kk, label, a, n) {
-    return n[kk, label] ? a[kk, label] / n[kk, label] : ""
-}
-function table(what, a, n, unit,    i, j, k2, line, v) {
-    printf "%-18s", what;
-    for (j = 1; j <= nkeys; j++) printf "%16s", hdr1[order[j]];
-    printf "\n%-18s", "";
-    for (j = 1; j <= nkeys; j++) printf "%16s", hdr2[order[j]];
-    printf "\n";
-    for (i = 1; i <= nrows; i++)
-    {
-        if (rows[i] == "total") continue;
-        printf "%-18s", rows[i];
-        for (j = 1; j <= nkeys; j++)
-        {
-            v = val(order[j], rows[i], a, n);
-            if (v == "") printf "%16s", "-";
-            else printf "%16.2f", v;
-        }
-        printf "\n";
-    }
-    # A rule as wide as the table, so the total stands apart
-    line = "";
-    for (j = 0; j < 18 + 16 * nkeys; j++) line = line "\u2500";
-    print line;
-    printf "%-18s", "total";
-    for (j = 1; j <= nkeys; j++)
-    {
-        v = val(order[j], "total", a, n);
-        if (v == "") printf "%16s", "-"; else printf "%16.2f", v;
-    }
-    printf "   %s\n\n", unit;
+
+function pad(s, w,    l, left) {         # centred, the way the box wants it
+    l = length (s);
+    if (l >= w) return s;
+    left = int ((w - l) / 2);
+    return sprintf ("%*s%s%*s", left, "", s, w - l - left, "");
 }
 
+function rule(l, m, r,    i, j, s) {
+    s = l;
+    for (j = 0; j < w0; j++) s = s "\342\224\200";
+    for (i = 1; i <= nkeys; i++)
+    {
+        s = s m;
+        for (j = 0; j < wid[i]; j++) s = s "\342\224\200";
+    }
+    print s r;
+}
+
+function line(first, arr,    i, s) {     # one line of the box
+    s = "\342\224\202" pad(first, w0);
+    for (i = 1; i <= nkeys; i++) s = s "\342\224\202" pad(arr[i], wid[i]);
+    print s "\342\224\202";
+}
+
+# A table of one line: the numbers a run has only one of. The header block is
+# three lines tall either way, so the name goes in it and the line below is
+# left to the numbers.
+function single(what, title, low,    i, v, best, cells) {
+    printf "%s - %s is better, best in bold\n\n", title, low ? "lower" : "higher";
+    rule("\342\224\214", "\342\224\254", "\342\224\220");
+    for (i = 1; i <= nkeys; i++) hdr[i] = h1[order[i]];
+    line(what, hdr);
+    for (i = 1; i <= nkeys; i++) hdr[i] = h2[order[i]];
+    line("", hdr);
+    for (i = 1; i <= nkeys; i++) hdr[i] = h3[order[i]];
+    line("", hdr);
+    rule("\342\224\234", "\342\224\274", "\342\224\244");
+    best = "";
+    for (i = 1; i <= nkeys; i++)
+    {
+        v = one[order[i], what];
+        if (v == "" || v == "-") continue;
+        if (best == "" || (low ? v + 0 < best : v + 0 > best)) best = v + 0;
+    }
+    for (i = 1; i <= nkeys; i++)
+    {
+        v = one[order[i], what];
+        if (v == "") v = "-";
+        cells[i] = (v != "-" && best != "" && v + 0 == best) ?
+                   B pad(v, wid[i]) O : pad(v, wid[i]);
+    }
+    printf "\342\224\202%s", pad(what, w0);
+    for (i = 1; i <= nkeys; i++) printf "\342\224\202%s", cells[i];
+    print "\342\224\202";
+    rule("\342\224\224", "\342\224\264", "\342\224\230");
+    print "";
+}
+
+# One table: which of the two numbers, and what to call it
+function table(idx, title,    i, j, k2, v, best, cells, hdr, blank) {
+    printf "%s - lower is better, best in bold\n\n", title;
+    rule("\342\224\214", "\342\224\254", "\342\224\220");
+    for (i = 1; i <= nkeys; i++) hdr[i] = h1[order[i]];
+    line("workload", hdr);
+    for (i = 1; i <= nkeys; i++) hdr[i] = h2[order[i]];
+    line("", hdr);
+    for (i = 1; i <= nkeys; i++) hdr[i] = h3[order[i]];
+    line("", hdr);
+    rule("\342\224\234", "\342\224\274", "\342\224\244");
+    for (j = 1; j <= nrows; j++)
+    {
+        if (rows[j] == "total")
+        {
+            rule("\342\224\234", "\342\224\274", "\342\224\244");
+        }
+        best = "";
+        for (i = 1; i <= nkeys; i++)
+        {
+            v = val[order[i], rows[j], idx];
+            if (v != "" && v != "-" && (best == "" || v + 0 < best))
+            {
+                best = v + 0;
+            }
+        }
+        for (i = 1; i <= nkeys; i++)
+        {
+            v = val[order[i], rows[j], idx];
+            if (v == "") v = "-";
+            # The bold codes are not printed characters, so the cell is padded
+            # first and dressed afterwards, or every column would come out short
+            if (v != "-" && best != "" && v + 0 == best)
+            {
+                cells[i] = B pad(v, wid[i]) O;
+            }
+            else
+            {
+                cells[i] = pad(v, wid[i]);
+            }
+        }
+        # already padded above
+        printf "\342\224\202%s", pad(rows[j], w0);
+        for (i = 1; i <= nkeys; i++) printf "\342\224\202%s", cells[i];
+        print "\342\224\202";
+    }
+    rule("\342\224\224", "\342\224\264", "\342\224\230");
+    print "";
+}
 
 FNR == 1 {
     k = key_of(FILENAME);
-    if (!(k in seen)) { seen[k] = 1; order[++nkeys] = k; }
+    if (!(k in seen)) { seen[k] = 1; order[++nkeys] = k }
     runs[k]++;
 }
-
+/compositing OFF/ { nocomp[k] = 1 }
 /^display:/  {
-    sub (/^display: */, "");
-    line = $0;
+    d = $0;
+    sub (/^display: */, "", d);
     # scale 1 and scale 1.00 are the same thing
-    if (match (line, /scale [0-9.]+/))
+    if (match (d, /scale [0-9.]+/))
     {
-        v = substr (line, RSTART + 6, RLENGTH - 6) + 0;
-        line = substr (line, 1, RSTART - 1) "scale " v;
+        d = substr (d, 1, RSTART - 1) "scale " (substr (d, RSTART + 6, RLENGTH - 6) + 0);
     }
-    disp[k] = line;
+    if (disp[k] == "") disp[k] = d;
+    else if (disp[k] != d) mixed[k] = 1;
 }
-/^session:/  { if ($2 == "x11") isx11[k] = 1 }
-/^compositor:/ { comp[k] = $2 " " $3; if (/compositing OFF/) nocomp[k] = 1 }
-/^work:/     { sub (/^work: */, ""); work[k] = $0 }
-/^energy:/   { en[k] += $2; enn[k]++ }
-/^speed:/                       { fps[k] += $2;   fpsn[k]++ }
-/fps fullscreen$/               { fsf[k] += $1;   fsn[k]++ }
-/fps fullscreen, asking/        { byf[k] += $1;   byn[k]++ }
+# The two a run has only one of, whatever it did. Averaged like the rest.
+/^energy:/   { esum[k] += $2; ecnt[k]++ }
+/^speed:/    { ssum[k] += $2; scnt[k]++ }
 
 # row: <watts> <cpu seconds> <seconds elapsed> <name>, as benchmark.sh writes
-# it at the end of its report, with a "-" for a column it could not measure.
-# The pretty table above it is for people: its columns move whenever the
-# wording does, so it is not what is read here.
+# it. Runs of the same desktop are averaged, so each column carries its count.
 /^row: / {
     label = $5;
     for (i = 6; i <= NF; i++) label = label " " $i;
-    add(k, label, $2, $3);
+    if (!(label in rowseen)) { rowseen[label] = 1; rows[++nrows] = label }
+    if ($2 != "-") { sum[k, label, 1] += $2; cnt[k, label, 1]++ }
+    if ($3 != "-") { sum[k, label, 2] += $3; cnt[k, label, 2]++ }
 }
-
-
-
 
 END {
     if (nkeys == 0) { print "nothing to compare"; exit 1 }
 
-    print "== power, watts (lower is better)";
-    table("workload", pw, pwn, "average while working");
-    print "== compositor CPU, seconds (lower is better)";
-    table("workload", cpu, cpun, "for the whole job");
-
-    print "== energy for all the work, joules (lower is better)";
-    printf "%-18s", "energy";
-    for (j = 1; j <= nkeys; j++)
-        if (enn[order[j]]) printf "%16.0f", en[order[j]] / enn[order[j]];
-        else printf "%16s", "-";
-    printf "\n\n";
-
-    print "== frames a second flat out, windowed (higher is better)";
-    printf "%-18s", "fps";
-    for (j = 1; j <= nkeys; j++)
-        printf "%16.1f", (fpsn[order[j]] ? fps[order[j]] / fpsn[order[j]] : 0);
-    printf "\n\n";
-
-    print "== notes";
-
-    # A column missing a row it would not perform cannot be ranked against
-    # one that did everything: its total is a total over less work. Say so
-    # instead of handing it a win it did not earn.
-    partial = 0;
-    for (i = 1; i <= nrows; i++)
+    # The total goes last, under a rule of its own
+    for (j = 1; j <= nrows; j++) if (rows[j] == "total") tj = j;
+    if (tj)
     {
-        if (rows[i] == "total") continue;
-        for (j = 1; j <= nkeys; j++)
-            if (!pwn[order[j], rows[i]] && !cpun[order[j], rows[i]])
+        for (j = tj; j < nrows; j++) rows[j] = rows[j + 1];
+        rows[nrows] = "total";
+    }
+
+    for (i = 1; i <= nkeys; i++)
+    {
+        k2 = order[i];
+        for (j = 1; j <= nrows; j++)
+        {
+            for (n = 1; n <= 2; n++)
             {
-                printf "* %s did not do \"%s\", so its total is over less work\n",
-                       order[j], rows[i];
-                partial = 1;
+                val[k2, rows[j], n] = cnt[k2, rows[j], n] ?
+                    sprintf ("%.2f", sum[k2, rows[j], n] / cnt[k2, rows[j], n]) : "-";
             }
+            if (rows[j] != "total" && val[k2, rows[j], 1] == "-") short[k2] = 1;
+        }
     }
-    if (partial)
-        print "* the totals below are NOT a ranking: they cover different work";
 
-    # Who won what, first: it is what the tables are read for
-    bw = 1e9; bwk = ""; bc = 1e9; bck = ""; bf = 0; bfk = "";
-    for (j = 1; j <= nkeys; j++)
+    # Wide enough for the longest thing in each column
+    w0 = length ("workload");
+    for (j = 1; j <= nrows; j++) if (length (rows[j]) > w0) w0 = length (rows[j]);
+    w0 += 2;
+    for (i = 1; i <= nkeys; i++)
     {
-        k2 = order[j];
-        v = val(k2, "total", pw, pwn);   if (v != "" && v < bw) { bw = v; bwk = k2 }
-        v = val(k2, "total", cpu, cpun);  if (v != "" && v < bc) { bc = v; bck = k2 }
-        v = (fpsn[k2] ? fps[k2] / fpsn[k2] : 0);
-        if (v > bf) { bf = v; bfk = k2 }
+        k2 = order[i];
+        wid[i] = length (h1[k2]);
+        if (length (h2[k2]) > wid[i]) wid[i] = length (h2[k2]);
+        if (length (h3[k2]) > wid[i]) wid[i] = length (h3[k2]);
+        if (wid[i] < 6) wid[i] = 6;
+        wid[i] += 2;
     }
-    # Nothing wins a column that nobody could measure
-    if (bfk != "") printf "* fastest: %s, %.1f fps\n", bfk, bf;
-    if (!partial)
+
+    for (i = 1; i <= nkeys; i++)
     {
-        if (bwk != "") printf "* more efficient: %s, %.2f W\n", bwk, bw;
-        if (bck != "") printf "* least CPU time: %s, %.2f s\n", bck, bc;
+        k2 = order[i];
+        one[k2, "fps"] = scnt[k2] ? sprintf ("%.2f", ssum[k2] / scnt[k2]) : "-";
+        one[k2, "energy"] = ecnt[k2] ? sprintf ("%.0f", esum[k2] / ecnt[k2]) : "-";
     }
 
-    # Only what changes a reading of the tables. Long notes do not get read.
-    for (j = 1; j <= nkeys; j++)
-        if (runs[order[j]] == 1)
-            printf "* %s: 1 run\n", order[j];
-        else
-            printf "* %s: average of %d runs\n", order[j], runs[order[j]];
+    single("fps", "Frames a second, windowed", 0);
+    single("energy", "Energy (J)", 1);
+    table(1, "Power (W)");
+    table(2, "Compositor CPU (s)");
 
-    # Were the conditions the same?
+    s = "";
+    for (i = 1; i <= nkeys; i++)
+        if (short[order[i]]) s = s (s == "" ? "" : ", ") order[i];
+    if (s != "") printf "* some tests didn'\''t run on: %s\n", s;
+
+    s = "";
+    for (i = 1; i <= nkeys; i++)
+        if (nocomp[order[i]]) s = s (s == "" ? "" : ", ") order[i];
+    if (s != "") printf "* no compositing on: %s\n", s;
+
+    for (i = 1; i <= nkeys; i++)
+        if (h3[order[i]] == "x11")
+        {
+            print "* on X11 some of the CPU is used by the X server, which we don'\''t measure";
+            break;
+        }
+
+    print "* fullscreen asked tests if the compositor steps aside when asked";
+
+    # Were the conditions the same? A different refresh rate or scale is not a
+    # detail: at 120 Hz the compositor repaints twice as often as at 60.
     same = 1; first = "";
-    for (j = 1; j <= nkeys; j++)
+    for (i = 1; i <= nkeys; i++)
     {
-        if (first == "") first = disp[order[j]];
-        else if (disp[order[j]] != first) same = 0;
+        if (mixed[order[i]]) same = 0;
+        if (first == "") first = disp[order[i]];
+        else if (disp[order[i]] != first) same = 0;
     }
-    if (same) printf "* same display everywhere: %s\n", first;
+    if (same)
+    {
+        printf "* same display everywhere: %s\n", first;
+    }
     else
     {
-        # A different refresh rate or scale is not a detail: at 120 Hz the
-        # compositor repaints twice as often as at 60, so each column above
-        # is answering a different question.
-        print "* THESE COLUMNS ARE NOT COMPARABLE: the display was not the";
-        print "  same in every run. Put the sessions on one mode and re-run.";
-        for (j = 1; j <= nkeys; j++)
-            printf "    %-14s %s\n", order[j], disp[order[j]];
+        print "* NOT COMPARABLE: the display was not the same in every run";
+        for (i = 1; i <= nkeys; i++)
+            printf "    %s: %s\n", order[i], disp[order[i]];
     }
 
-    # A window manager that does not composite is the floor, not a rival. It
-    # said so itself when it ran; a low CPU total is not the same thing,
-    # since a cheap compositor has one too.
-    for (j = 1; j <= nkeys; j++)
-        if (nocomp[order[j]])
-            printf "* %s is not compositing: read it as the floor\n", order[j];
-
-    printf "* fullscreen asked test if the compositor is disabled when asked\n";
-
-    x = "";
-    for (j = 1; j <= nkeys; j++)
-        if (isx11[order[j]]) x = x (x == "" ? "" : ", ") order[j];
-    if (x != "")
-        printf "* on X11 the CPU column is the window manager alone: the X server does\n  part of the compositing and all of the drawing, and holding either\n  against a Wayland column reads high or low. Compare X11 with X11.\n";
+    # Runs of the same desktop are averaged, so how many there were matters
+    same = 1;
+    for (i = 2; i <= nkeys; i++) if (runs[order[i]] != runs[order[1]]) same = 0;
+    if (same)
+    {
+        printf "* %d run%s each\n", runs[order[1]], runs[order[1]] == 1 ? "" : "s";
+    }
+    else
+    {
+        for (i = 1; i <= nkeys; i++)
+            printf "* %s: %d run%s\n", order[i], runs[order[i]],
+                   runs[order[i]] == 1 ? "" : "s";
+    }
 }
 ' "${FILES[@]}"
