@@ -465,7 +465,8 @@ fi
 # never moved, one level up.
 if [ "$TROWS" -gt 0 ] && [ -z "$LOADFAIL" ] && [ "${#REFUSED[@]}" != 0 ]; then
     echo "$RULE"
-    echo "no total: ${#REFUSED[@]} tests not done"
+    [ "${#REFUSED[@]}" = 1 ] && N=test || N=tests
+    echo "no total: ${#REFUSED[@]} $N not done"
 fi
 if [ "$TROWS" -gt 0 ] && [ -z "$LOADFAIL" ] && [ "${#REFUSED[@]}" = 0 ]; then
     echo "$RULE"
