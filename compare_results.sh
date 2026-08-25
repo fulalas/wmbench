@@ -33,7 +33,7 @@ awk -v B="$B" -v O="$O" '
 # What ran is read from the report itself, never from the name of the file:
 # a report that was renamed, or whose header was corrected by hand, has to
 # come out of here as what it says it is.
-function key_from_report(path,    line, s, de, wm, st, kk) {
+function key_from_report(path,    line, s, de, wm, st, ver, kk) {
     while ((getline line < path) > 0)
     {
         if (line ~ /^session:/)
@@ -55,6 +55,11 @@ function key_from_report(path,    line, s, de, wm, st, kk) {
         {
             wm = line;
             sub (/^compositor: */, "", wm);
+            # The version is the word after the name, before the note in
+            # brackets. Empty when nothing would say what it is
+            ver = wm;
+            sub (/^[^ ]* */, "", ver);
+            sub (/ *\(.*$/, "", ver);
             sub (/ .*$/, "", wm);
             # wm_canon writes the name in lower case, so a hand-typed one has
             # to be folded too or the same desktop gets two columns
@@ -70,9 +75,14 @@ function key_from_report(path,    line, s, de, wm, st, kk) {
     if (de == "" || de == "unknown-desktop") de = "unknown";
 
     kk = de "/" wm "/" st;
-    # The three parts go one above the other: on one line the header alone is
-    # wider than the numbers under it, and the table wraps
+    # The parts go one above the other: on one line the header alone is wider
+    # than the numbers under it, and the table wraps
     h1[kk] = de; h2[kk] = wm; h3[kk] = st;
+    # A column can hold more than one run. A desktop whose compositor was
+    # upgraded between them would otherwise print whichever version was read
+    # last over numbers that came from both
+    if (!(kk in h4)) h4[kk] = ver;
+    else if (h4[kk] != ver) vmixed[kk] = 1;
 
     return kk;
 }
@@ -113,6 +123,8 @@ function single(what, title, low,    i, v, best, cells) {
     line("", hdr);
     for (i = 1; i <= nkeys; i++) hdr[i] = h3[order[i]];
     line("", hdr);
+    for (i = 1; i <= nkeys; i++) hdr[i] = h4[order[i]];
+    line("", hdr);
     rule("\342\224\234", "\342\224\274", "\342\224\244");
     best = "";
     for (i = 1; i <= nkeys; i++)
@@ -144,6 +156,8 @@ function table(idx, title,    i, j, k2, v, best, cells, hdr, blank) {
     for (i = 1; i <= nkeys; i++) hdr[i] = h2[order[i]];
     line("", hdr);
     for (i = 1; i <= nkeys; i++) hdr[i] = h3[order[i]];
+    line("", hdr);
+    for (i = 1; i <= nkeys; i++) hdr[i] = h4[order[i]];
     line("", hdr);
     rule("\342\224\234", "\342\224\274", "\342\224\244");
     for (j = 1; j <= nrows; j++)
@@ -261,9 +275,11 @@ END {
     for (i = 1; i <= nkeys; i++)
     {
         k2 = order[i];
+        if (vmixed[k2]) h4[k2] = h4[k2] "*";
         wid[i] = length (h1[k2]);
         if (length (h2[k2]) > wid[i]) wid[i] = length (h2[k2]);
         if (length (h3[k2]) > wid[i]) wid[i] = length (h3[k2]);
+        if (length (h4[k2]) > wid[i]) wid[i] = length (h4[k2]);
         if (wid[i] < 6) wid[i] = 6;
         wid[i] += 2;
     }
@@ -289,6 +305,11 @@ END {
     for (i = 1; i <= nkeys; i++)
         if (nocomp[order[i]]) s = s (s == "" ? "" : ", ") order[i];
     if (s != "") printf "* no compositing on: %s\n", s;
+
+    s = "";
+    for (i = 1; i <= nkeys; i++)
+        if (vmixed[order[i]]) s = s (s == "" ? "" : ", ") order[i];
+    if (s != "") printf "* marked *: the runs were not all the same version: %s\n", s;
 
     for (i = 1; i <= nkeys; i++)
         if (h3[order[i]] == "x11")
