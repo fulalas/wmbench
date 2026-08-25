@@ -186,7 +186,14 @@ int main (int argc, char **argv)
             XFillRectangle (d, w, gc, 10, 10 + j * 42, popw - 20, 36);
         }
         XSync (d, False);
-        usleep (12000);
+        /*
+         * At least one refresh period, so every popup is presented whatever
+         * the phase. Shorter than a frame, and the 50 ms cycle - an exact
+         * multiple of a 60 Hz frame - landed the map at the same point of
+         * every frame: whole runs showed all the popups or none of them, by
+         * where that point happened to fall.
+         */
+        usleep (25000);
         XUnmapWindow (d, w);
         XSync (d, False);
         cycles++;
