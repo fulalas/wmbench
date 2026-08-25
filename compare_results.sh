@@ -13,7 +13,7 @@ DIR=${1:-$(dirname "$0")/results}
 # Only reports carrying the data block at the end can be read; the table above
 # it in a report moves whenever the wording does.
 FILES=()
-for f in "$DIR"/benchmark-*.txt; do
+for f in "$DIR"/*.txt; do
     grep -q '^row: ' "$f" 2>/dev/null && FILES+=("$f")
 done
 if [ "${#FILES[@]}" = 0 ]; then
@@ -30,34 +30,49 @@ else
 fi
 
 awk -v B="$B" -v O="$O" '
-# benchmark-<date>-<time>-<host>-<de>-<wm>-<version>-<session>.txt, and older
-# files without a version. Only the tail can be counted from the end: the
-# window manager name and the version have their dashes taken out where they
-# are built, but the desktop has colons, slashes and spaces turned into dashes,
-# so ubuntu:GNOME arrives here as ubuntu-gnome and is not one field. It is
-# whatever lies between the fixed benchmark-<date>-<time>-<host>- head and the
-# tail.
-function key_of(path,    n, p, f, q, de, wm, i, last) {
-    n = split (path, p, "/");
-    f = p[n];
-    sub (/\.txt$/, "", f);
-    n = split (f, q, "-");
-    # A version is a number, or the literal "unknown" benchmark.sh writes when
-    # nothing tells it one
-    if (q[n - 1] ~ /^[0-9]/ || q[n - 1] == "unknown")
+# What ran is read from the report itself, never from the name of the file:
+# a report that was renamed, or whose header was corrected by hand, has to
+# come out of here as what it says it is.
+function key_from_report(path,    line, s, de, wm, st, kk) {
+    while ((getline line < path) > 0)
     {
-        wm = q[n - 2]; last = n - 3;
+        if (line ~ /^session:/)
+        {
+            s = line;
+            sub (/^session: */, "", s);
+            st = s;
+            sub (/ .*$/, "", st);
+            st = tolower (st);
+            # Only the first group: a hand-written note after it would end up
+            # in the header and take the whole table wider with it
+            if (match (s, /\([^)]*\)/))
+            {
+                de = tolower (substr (s, RSTART + 1, RLENGTH - 2));
+                gsub (/[:\/ ]/, "-", de);
+            }
+        }
+        else if (line ~ /^compositor:/)
+        {
+            wm = line;
+            sub (/^compositor: */, "", wm);
+            sub (/ .*$/, "", wm);
+            # wm_canon writes the name in lower case, so a hand-typed one has
+            # to be folded too or the same desktop gets two columns
+            wm = tolower (wm);
+        }
+        else if (line ~ /^== data/)
+        {
+            break;
+        }
     }
-    else
-    {
-        wm = q[n - 1]; last = n - 2;
-    }
-    de = q[5];
-    for (i = 6; i <= last; i++) de = de "-" q[i];
-    kk = de "/" wm "/" q[n];
+    close (path);
+    if (st == "" || wm == "") return "";
+    if (de == "" || de == "unknown-desktop") de = "unknown";
+
+    kk = de "/" wm "/" st;
     # The three parts go one above the other: on one line the header alone is
     # wider than the numbers under it, and the table wraps
-    h1[kk] = de; h2[kk] = wm; h3[kk] = q[n];
+    h1[kk] = de; h2[kk] = wm; h3[kk] = st;
 
     return kk;
 }
@@ -173,10 +188,16 @@ function table(idx, title,    i, j, k2, v, best, cells, hdr, blank) {
 }
 
 FNR == 1 {
-    k = key_of(FILENAME);
+    k = key_from_report(FILENAME);
+    if (k == "")
+    {
+        ignored = ignored (ignored == "" ? "" : ", ") FILENAME;
+        next;
+    }
     if (!(k in seen)) { seen[k] = 1; order[++nkeys] = k }
     runs[k]++;
 }
+k == "" { next }
 /compositing OFF/ { nocomp[k] = 1 }
 /^display:/  {
     d = $0;
@@ -204,7 +225,12 @@ FNR == 1 {
 }
 
 END {
-    if (nkeys == 0) { print "nothing to compare"; exit 1 }
+    if (nkeys == 0)
+    {
+        print "nothing to compare";
+        if (ignored != "") printf "no session or compositor line in: %s\n", ignored;
+        exit 1;
+    }
 
     # The total goes last, under a rule of its own
     for (j = 1; j <= nrows; j++) if (rows[j] == "total") tj = j;
@@ -292,6 +318,9 @@ END {
         for (i = 1; i <= nkeys; i++)
             printf "    %s: %s\n", order[i], disp[order[i]];
     }
+
+    if (ignored != "")
+        printf "* left out, no session or compositor line: %s\n", ignored;
 
     # Runs of the same desktop are averaged, so how many there were matters
     same = 1;
