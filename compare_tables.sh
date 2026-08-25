@@ -1,7 +1,6 @@
 #!/bin/bash
-# Put every benchmark result in two boxed tables, one for power and one for
-# compositor CPU: one column per desktop, one line per test, the best of each
-# line in bold.
+# Put every benchmark result in four boxed tables - frame rate, energy, power
+# and compositor CPU - one column per desktop, the best of each line in bold.
 #
 #   ./compare_tables.sh [folder]        default results/
 #
@@ -82,6 +81,40 @@ function line(first, arr,    i, s) {     # one line of the box
     print s "\342\224\202";
 }
 
+# A table of one line: the numbers a run has only one of. The header block is
+# three lines tall either way, so the name goes in it and the line below is
+# left to the numbers.
+function single(what, title, low,    i, v, best, cells) {
+    printf "%s - %s is better, best in bold\n\n", title, low ? "lower" : "higher";
+    rule("\342\224\214", "\342\224\254", "\342\224\220");
+    for (i = 1; i <= nkeys; i++) hdr[i] = h1[order[i]];
+    line(what, hdr);
+    for (i = 1; i <= nkeys; i++) hdr[i] = h2[order[i]];
+    line("", hdr);
+    for (i = 1; i <= nkeys; i++) hdr[i] = h3[order[i]];
+    line("", hdr);
+    rule("\342\224\234", "\342\224\274", "\342\224\244");
+    best = "";
+    for (i = 1; i <= nkeys; i++)
+    {
+        v = one[order[i], what];
+        if (v == "" || v == "-") continue;
+        if (best == "" || (low ? v + 0 < best : v + 0 > best)) best = v + 0;
+    }
+    for (i = 1; i <= nkeys; i++)
+    {
+        v = one[order[i], what];
+        if (v == "") v = "-";
+        cells[i] = (v != "-" && best != "" && v + 0 == best) ?
+                   B pad(v, wid[i]) O : pad(v, wid[i]);
+    }
+    printf "\342\224\202%s", pad(what, w0);
+    for (i = 1; i <= nkeys; i++) printf "\342\224\202%s", cells[i];
+    print "\342\224\202";
+    rule("\342\224\224", "\342\224\264", "\342\224\230");
+    print "";
+}
+
 # One table: which of the two numbers, and what to call it
 function table(idx, title,    i, j, k2, v, best, cells, hdr, blank) {
     printf "%s - lower is better, best in bold\n\n", title;
@@ -135,8 +168,23 @@ function table(idx, title,    i, j, k2, v, best, cells, hdr, blank) {
 FNR == 1 {
     k = key_of(FILENAME);
     if (!(k in seen)) { seen[k] = 1; order[++nkeys] = k }
+    runs[k]++;
 }
 /compositing OFF/ { nocomp[k] = 1 }
+/^display:/  {
+    d = $0;
+    sub (/^display: */, "", d);
+    # scale 1 and scale 1.00 are the same thing
+    if (match (d, /scale [0-9.]+/))
+    {
+        d = substr (d, 1, RSTART - 1) "scale " (substr (d, RSTART + 6, RLENGTH - 6) + 0);
+    }
+    if (disp[k] == "") disp[k] = d;
+    else if (disp[k] != d) mixed[k] = 1;
+}
+# The two a run has only one of, whatever it did. Averaged like the rest.
+/^energy:/   { esum[k] += $2; ecnt[k]++ }
+/^speed:/    { ssum[k] += $2; scnt[k]++ }
 
 # row: <watts> <cpu seconds> <seconds elapsed> <name>, as benchmark.sh writes
 # it. Runs of the same desktop are averaged, so each column carries its count.
@@ -187,6 +235,15 @@ END {
         wid[i] += 2;
     }
 
+    for (i = 1; i <= nkeys; i++)
+    {
+        k2 = order[i];
+        one[k2, "fps"] = scnt[k2] ? sprintf ("%.2f", ssum[k2] / scnt[k2]) : "-";
+        one[k2, "energy"] = ecnt[k2] ? sprintf ("%.0f", esum[k2] / ecnt[k2]) : "-";
+    }
+
+    single("fps", "Frames a second, windowed", 0);
+    single("energy", "Energy (J)", 1);
     table(1, "Power (W)");
     table(2, "Compositor CPU (s)");
 
@@ -206,5 +263,41 @@ END {
             print "* on X11 some of the CPU is used by the X server, which we don'\''t measure";
             break;
         }
+
+    print "* fullscreen asked tests if the compositor steps aside when asked";
+
+    # Were the conditions the same? A different refresh rate or scale is not a
+    # detail: at 120 Hz the compositor repaints twice as often as at 60.
+    same = 1; first = "";
+    for (i = 1; i <= nkeys; i++)
+    {
+        if (mixed[order[i]]) same = 0;
+        if (first == "") first = disp[order[i]];
+        else if (disp[order[i]] != first) same = 0;
+    }
+    if (same)
+    {
+        printf "* same display everywhere: %s\n", first;
+    }
+    else
+    {
+        print "* NOT COMPARABLE: the display was not the same in every run";
+        for (i = 1; i <= nkeys; i++)
+            printf "    %s: %s\n", order[i], disp[order[i]];
+    }
+
+    # Runs of the same desktop are averaged, so how many there were matters
+    same = 1;
+    for (i = 2; i <= nkeys; i++) if (runs[order[i]] != runs[order[1]]) same = 0;
+    if (same)
+    {
+        printf "* %d run%s each\n", runs[order[1]], runs[order[1]] == 1 ? "" : "s";
+    }
+    else
+    {
+        for (i = 1; i <= nkeys; i++)
+            printf "* %s: %d run%s\n", order[i], runs[order[i]],
+                   runs[order[i]] == 1 ? "" : "s";
+    }
 }
 ' "${FILES[@]}"
