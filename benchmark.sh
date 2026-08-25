@@ -35,7 +35,7 @@ tests:
   uncapped  the frame rate flat out, windowed. Runs last
   stress    everything at once: many windows, one moving, one resizing,
             popups, a translucent window and a GL render. Each does the same
-            amount of work it does in its own row above, and the row ends when
+            amount of work it does in its own test above, and it ends when
             the last of them has finished it - not on the clock
 
 Every test does the same fixed amount of work in every session, however long
@@ -43,10 +43,10 @@ that takes, so power and CPU time compare directly; the time it took is
 a result, not a setting. The one exception is uncapped, which is deliberately
 flat out and reports only frames a second.
 
-A row whose work the desktop refuses - a compositor that will not move a
-window it manages, for one - is left empty and named at the end. An empty
-row says nothing; a small number for a window that never moved reads as the
-best result in the table.
+A test the desktop refuses - a compositor that will not move a window it
+manages, for one - is left empty and named at the end. An empty line says
+nothing; a small number for a window that never moved reads as the best
+result in the table.
 
 The result is printed and saved under results/.
 EOF
@@ -465,8 +465,7 @@ fi
 # never moved, one level up.
 if [ "$TROWS" -gt 0 ] && [ -z "$LOADFAIL" ] && [ "${#REFUSED[@]}" != 0 ]; then
     echo "$RULE"
-    echo "no total: this desktop did not do ${#REFUSED[@]} of the rows, and a"
-    echo "total over the rest would undercut every session that did them all"
+    echo "no total: ${#REFUSED[@]} tests not done"
 fi
 if [ "$TROWS" -gt 0 ] && [ -z "$LOADFAIL" ] && [ "${#REFUSED[@]}" = 0 ]; then
     echo "$RULE"
@@ -489,7 +488,7 @@ fi
 
 if [ -n "$FPS" ]; then
     echo
-    echo "speed:   $FPS fps windowed, flat out"
+    echo "speed:   $FPS fps windowed"
 fi
 
 # Only where there is a battery to spend
@@ -512,33 +511,17 @@ if [ "$TROWS" -gt 0 ] && [ -z "$LOADFAIL" ] && [ "$ST" = x11 ]; then
     echo "Neither column holds all of it, so read X11 against X11."
 fi
 
-# Where a load did not get the place it asked for. It is not a failure - a
-# window somewhere else costs about the same to composite - but it means this
-# session laid the scene out differently from one that honoured the request,
-# and that belongs in the report rather than in a log about to be deleted.
-IGNORED=$(grep -h '^PLACE-IGNORED ' bm-*.log 2>/dev/null |
-          sed 's/^PLACE-IGNORED //' | sort -u)
-if [ -n "$IGNORED" ]; then
-    echo
-    echo "this desktop placed these windows itself, not where they asked:"
-    echo "$IGNORED" | sed 's/^/  /'
-fi
-
-# The rows this desktop would not perform, said once, plainly. A reader who
-# sees "-" in the table needs to know it is a refusal and not a broken sensor.
+# A reader who sees "-" in the table needs to know it is the desktop refusing
+# the work, not a broken sensor. Named once, in the words of the table above.
+# Why each one was refused is in its bm-*.log, which is kept when this happens.
 if [ "${#REFUSED[@]}" != 0 ]; then
     echo
-    echo "not done by this desktop, so left out of the total:"
-    for r in "${REFUSED[@]}"; do
-        echo "  $r"
-    done
-    echo "The compositor would not do what these rows are about, so they are"
-    echo "empty rather than filled with a number for something else. Their"
-    echo "logs are kept as bm-*.log."
+    echo "this environment doesn't allow the following tests to run properly:"
+    ( IFS=,; echo "${REFUSED[*]}" ) | sed 's/,/, /g' | fold -s -w 66
 fi
 
 if [ -n "$LOADFAIL" ]; then
-    red "FAILED to run:$LOADFAIL - the rows are missing above; their logs"
+    red "FAILED to run:$LOADFAIL - the tests are missing above; their logs"
     red "are kept as bm-*.log"
 elif [ "${#REFUSED[@]}" = 0 ]; then
     rm -f bm-*.log
