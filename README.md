@@ -27,11 +27,11 @@ fullscreen asking compositing to step aside with `_NET_WM_BYPASS_COMPOSITOR`.
 
 No workload repeats work another one does: the scripted person is split into
 `windows` (maximize, minimize, snap, raise, fullscreen) and `scroll`, next to
-the `resize` and `dnd` rows.
+the `resize` and `dnd` tests.
 
-Every load says where its windows actually landed, and the rows built out of
+Every load says where its windows actually landed, and the tests built out of
 moving windows check that the windows really moved. Where a compositor
-refuses - cosmic-comp will not reposition an X11 window it manages - the row
+refuses - cosmic-comp will not reposition an X11 window it manages - the test
 is left empty and named at the end rather than filled with the small number a
 compositor doing nothing produces.
 
