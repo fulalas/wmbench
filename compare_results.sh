@@ -161,8 +161,10 @@ function table(idx, title,    i, j, k2, v, best, cells, hdr, blank) {
                 cells[i] = pad(v, wid[i]);
             }
         }
-        # already padded above
-        printf "\342\224\202%s", pad(rows[j], w0);
+        # already padded above. Watts are a rate: the last row of the power
+        # table is the average over the run, and only the seconds ever add up
+        printf "\342\224\202%s", pad((rows[j] == "total" && idx == 1) ?
+                                     "average" : rows[j], w0);
         for (i = 1; i <= nkeys; i++) printf "\342\224\202%s", cells[i];
         print "\342\224\202";
     }
