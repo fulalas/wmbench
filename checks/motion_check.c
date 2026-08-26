@@ -1,11 +1,9 @@
 /*
+ *   motion_check [captures]
+ *
  * Captures the screen WHILE a known pattern scrolls, so corruption that only
  * exists during motion is seen. Every capture must show one single offset of
  * the pattern; a capture mixing two offsets is tearing or stale pixels.
- *
- * Replaces motion_check.py, whose python-xlib and PIL are no longer installed.
- *
- *   motion_check [captures]
  *
  * Three environment variables put it inside the stress mix, which is how
  * validate.sh asks the same question of a compositor that is busy: BENCH_ABOVE

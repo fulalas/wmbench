@@ -1,20 +1,10 @@
 /*
- * A desktop with a lot of windows on it, which nothing here has covered. The
- * eight-window stress had eight windows all drawing flat out, measuring
- * throughput; this is the other shape of the same question: many windows
- * sitting there doing nothing while one small thing animates, which is what a
- * real desktop looks like.
- *
- * It is what decides whether skipping the blended pass for windows whose
- * shadow is nowhere near the damage is worth its four rectangle tests.
- *
  *   manywin <count> [seconds]
  *
- * Opens <count> ordinary managed windows with content, spread over the screen,
- * and holds them there. With no seconds given, or zero, it holds them until it
- * is killed: the windows are scenery, not work, so there is nothing to count
- * here and nothing that should end a measurement. Whoever started it decides
- * when the screen is no longer needed.
+ * Many windows sitting there doing nothing while one small thing animates,
+ * which is what a real desktop looks like. With no seconds given, or zero, it
+ * holds them until it is killed: the windows are scenery, not work, so there is
+ * nothing to count here and nothing that should end a measurement.
  */
 #include <stdio.h>
 #include <stdlib.h>

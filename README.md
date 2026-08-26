@@ -53,8 +53,9 @@ Some Wayland rows measure a differently-shaped ask:
   compositor's configure events. Zones make the walks real moves; elsewhere
   nothing a client says moves a managed toplevel, so the twelve steps to each
   edge are carried by the size instead - the same count of composited steps.
-  Unminimise goes through foreign-toplevel where it exists and an
-  xdg-activation token otherwise; neither, and the row exits 3.
+  It minimizes last and leaves the window minimized: bringing one back is
+  refused by KWin and mutter, so ending there is what lets every desktop run
+  the same test. Results from before this do not compare on that row.
 - **zone placement** reports positions back, so those rows need no screenshot.
   It deliberately will not say where a window sits on screen, so pixel checks
   never aim at one.
@@ -86,7 +87,7 @@ step aside - is read in power, not frames, because the saving is the
 compositor's work and not the application's.
 
 No workload repeats another: the scripted person is split into `windows`
-(maximize, minimize, snap, raise, fullscreen) and `scroll`, beside `resize` and
+(maximize, snap, raise, fullscreen, minimize) and `scroll`, beside `resize` and
 `dnd`.
 
 Every load says where its windows landed, and the moving tests check they

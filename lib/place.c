@@ -1,21 +1,16 @@
 /*
- * Where a window actually ended up.
- *
- * Every load here asks for a place on the screen and then draws as if it got
- * it. Most window managers give it. Some place windows themselves and ignore
- * the request entirely - cosmic-comp does - and then a load meant to sit
- * beside another sits on top of it, menus open away from the window they
- * belong to, and the mix composites a scene nobody designed. The numbers
- * still come out, and they are numbers for a different picture.
+ * Every load asks for a place on the screen and then draws as if it got it.
+ * Some window managers place windows themselves and ignore the request, and
+ * then a load meant to sit beside another sits on top of it, menus open away
+ * from the window they belong to, and the mix composites a scene nobody
+ * designed. The numbers still come out, for a different picture.
  *
  * So: ask, look, and say so. A row whose scene was never built is worth less
  * than no row at all, because it reads as a result.
  *
- * This file is the policy: what counts as moved, what the lines say. How a
- * window is moved and where it is believed to be is the backend's, and on
- * Wayland believing is not enough - the compositor never says where anything
- * is, so the answer is proved with a screenshot once before the measurement
- * and once after it, never inside it.
+ * On Wayland believing is not enough - nothing says where a window is - so the
+ * answer is proved with a screenshot once before the measurement and once
+ * after it, never inside it.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -321,7 +316,7 @@ static int wl_probe (bw_win *w, int x, int y, int width, int height)
     if (bw_move_raw (w, x, y, 0, 0, 1) < 0)
     {
         printf ("moves: neither way works\n");
-        printf ("MOVE-REFUSED this session does not move a mapped window\n");
+        printf ("MOVE-REFUSED the window manager does not move a mapped window\n");
         fflush (stdout);
 
         return -1;
@@ -349,7 +344,7 @@ static int wl_probe (bw_win *w, int x, int y, int width, int height)
                                        : "neither way works");
         if (got < 0)
         {
-            printf ("MOVE-REFUSED this session does not move a mapped "
+            printf ("MOVE-REFUSED the window manager does not move a mapped "
                     "window\n");
             wl_verified = 0;
         }
@@ -374,14 +369,13 @@ static int wl_probe (bw_win *w, int x, int y, int width, int height)
     printf ("probe: layer-shell margins moved %d,%d of %d,%d%s\n",
             proof != 0 ? STEP_X : 0, proof != 0 ? STEP_Y : 0, STEP_X, STEP_Y,
             proof < 0 ? " (unproven)" : "");
-    /* Back where it belongs */
     bw_move_raw (w, x, y, width, height, 1);
     bw_sync ();
     usleep (300000);
     if (proof == 0 && screen_is_ours ())
     {
         printf ("moves: neither way works\n");
-        printf ("MOVE-REFUSED this session does not move a mapped window\n");
+        printf ("MOVE-REFUSED the window manager does not move a mapped window\n");
         fflush (stdout);
         wl_verified = 0;
 
@@ -421,13 +415,12 @@ int bench_probe_move (bw_win *w, int x, int y, int width, int height)
     {
         /*
          * The plain call first. Both ways work under most window managers,
-         * and xfwm4 obeys the pager request only sometimes - picking whichever
-         * answered first would send one run down one path in the window
-         * manager and the next run down another, and the two numbers would
-         * not be comparable. The plain call is the one a program makes, so it
-         * is the one to prefer; the pager request is the fallback for the
-         * compositors that ignore a plain move of a mapped window, which is
-         * what mutter does on Wayland.
+         * and one of them obeys the pager request only sometimes - picking
+         * whichever answered first would send one run down one path in the
+         * window manager and the next run down another, and the two numbers
+         * would not compare. The plain call is the one a program makes, so it
+         * is the one to prefer; the pager request is the fallback for those
+         * that ignore a plain move of a mapped window.
          */
         if (try_move (w, 1, "plain client calls"))
         {
@@ -439,7 +432,6 @@ int bench_probe_move (bw_win *w, int x, int y, int width, int height)
         }
     }
 
-    /* Back where it belongs, by whichever way works */
     bw_move_raw (w, x, y, width, height, (got == 1));
     bw_sync ();
     usleep (300000);
@@ -449,7 +441,7 @@ int bench_probe_move (bw_win *w, int x, int y, int width, int height)
                                       : "neither way works");
     if (got < 0)
     {
-        printf ("MOVE-REFUSED this session does not move a mapped window\n");
+        printf ("MOVE-REFUSED the window manager does not move a mapped window\n");
     }
     fflush (stdout);
     /*

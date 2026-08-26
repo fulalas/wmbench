@@ -1,17 +1,11 @@
 /*
- * A video player, which nothing here has covered and which is one of the
- * commonest things a compositor has to composite.
- *
- * The difference from every other benchmark in this directory is where the
- * window's pixels come from. Everything else either renders with OpenGL or
- * draws with server primitives; a player hands over a whole buffer of pixels
- * it made itself. The pixmap the compositor then samples as a texture has
- * been filled by the CPU, and may not be laid out the way a GPU-rendered one
- * is. If sampling it is slow, this is where the OpenGL renderer would lose.
- *
  *   videobench <seconds> [frames per second] [width] [height]
  *
  * BENCH_TASKS=N hands over N frames instead of running for the seconds given.
+ *
+ * What makes this different from the other loads is where the pixels come
+ * from: a player hands over a whole buffer it filled with the CPU, which may
+ * not be laid out the way a GPU-rendered one is, and sampling it can be slow.
  */
 #include <stdio.h>
 #include <stdlib.h>

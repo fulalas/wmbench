@@ -18,8 +18,8 @@ tests:
             does, at 60 a second
   argb      2400 redraws of a transparent window that declares an opaque
             region, which is what every GTK window is, at 120 a second
-  windows   maximize, minimize, snap to the sides and corners, raise
-            two windows over each other, fullscreen and back
+  windows   maximize, snap to the sides and corners, raise two windows
+            over each other, fullscreen and back, then minimize
   scroll    a text document scrolled by the chevrons, then by dragging
             the thumb the whole way and back
   render    1200 frames of a GL window held to 60 fps
@@ -233,7 +233,7 @@ measure () {
         'BEGIN{printf "%s %s %.1f", w, c, t1 - t0}'
 }
 
-REFUSED=()
+REFUSED=(); REFUSED_LOGS=()
 ROW_OUT=""
 run_row () {
     local label=$1 name=$2 rc
@@ -243,12 +243,10 @@ run_row () {
     case $rc in
         0) tally "$label" "$ROW_OUT";;
         3) done_running; ROW_OUT=""
-           REFUSED+=("$label")
-           # Without a data line the comparison drops the row as if it had
-           # never been asked for
-           DATA+=("- - - $label")
-           printf '%-18s%13s%16s%14s\n' "$label" "-" "-" "not done";;
-        *) done_running; ROW_OUT=""; LOADFAIL="$LOADFAIL $name";;
+           REFUSED+=("$label"); REFUSED_LOGS+=("$name")
+           row_state "$label" not_done;;
+        *) done_running; ROW_OUT=""; LOADFAIL="$LOADFAIL $name"
+           row_state "$label" failed;;
     esac
 }
 
@@ -267,6 +265,21 @@ done_running () { printf '\033[2K\r' >&3; }
 
 RULE=$(printf '\u2500%.0s' $(seq 61))
 DATA=()
+
+# The colour goes outside the padded field: inside it the escapes count as
+# characters and the column comes out short by their width
+row_state () {
+    local colour word
+    case "$2" in
+        failed)   colour=$RED;    word=failed;;
+        not_done) colour=$YELLOW; word="not done";;
+    esac
+    done_running
+    # Without a data line the comparison drops the row as if it had never been
+    # asked for
+    DATA+=("- - - $1")
+    printf '%-18s%13s%16s%s%14s%s\n' "$1" "-" "-" "$colour" "$word" "$OFF"
+}
 print_row () {
     local w c t
     done_running
@@ -433,7 +446,6 @@ if want stress; then
         # the sensor's background sampler runs on through the next test and
         # that test's power_begin loses the handle on it
         power_end > /dev/null
-        LOADFAIL="$LOADFAIL stress"
     fi
     # A load whose window never moved leaves a scene no other session had, so
     # the row is not a result
@@ -442,17 +454,24 @@ if want stress; then
     for l in "${SL[@]}"; do
         grep -q MOVE-NEVER-HAPPENED "$l" 2>/dev/null && MIX_OK=0
     done
-    if [ "$MIX_OK" = 0 ] && [ -n "$STRESS" ]; then
-        done_running
-        REFUSED+=("stress")
-        DATA+=("- - - stress")
-        printf '%-18s%13s%16s%14s\n' stress "-" "-" "not done"
+    # A load that died is asked about before the scene is: a mix that lost one
+    # of its own is a failure with a log to read, not a desktop saying no
+    if [ "$OK" != 1 ] || [ -n "$STRESS_THIN" ]; then
+        # The six are given work that has them finish together, so one leaving
+        # early leaves the rest running against a lighter screen than any other
+        # session's
+        [ -n "$STRESS_THIN" ] &&
+            echo "one of the six loads finished early, $STRESS_THIN% of the run" \
+                 "went with less on screen" >> "$STRESS_PRE-thin.log"
+        LOADFAIL="$LOADFAIL stress"
+        row_state stress failed
+        STRESS=""
+    elif [ "$MIX_OK" = 0 ]; then
+        REFUSED+=("stress"); REFUSED_LOGS+=("stress")
+        row_state stress not_done
         STRESS=""
     fi
     tally "stress" "$STRESS"
-    [ -n "$STRESS" ] && [ -n "$STRESS_THIN" ] &&
-        echo "stress: one of the six finished early, the last $STRESS_THIN% of it" \
-             "ran with less on screen"
 fi
 
 if want uncapped; then
@@ -473,10 +492,14 @@ fi
 
 # A total over fewer rows is a smaller total: printing one for a session that
 # skipped work hands it the win in every column it did not do
-if [ "$TROWS" -gt 0 ] && [ -z "$LOADFAIL" ] && [ "${#REFUSED[@]}" != 0 ]; then
+NFAIL=$(set -- $LOADFAIL; echo $#)
+if [ "$TROWS" -gt 0 ] && { [ "$NFAIL" != 0 ] || [ "${#REFUSED[@]}" != 0 ]; }; then
     echo "$RULE"
-    [ "${#REFUSED[@]}" = 1 ] && N=test || N=tests
-    echo "no total: ${#REFUSED[@]} $N not done"
+    MISSING=""
+    [ "$NFAIL" != 0 ] && MISSING="$NFAIL failed"
+    [ "${#REFUSED[@]}" != 0 ] &&
+        MISSING="${MISSING:+$MISSING, }${#REFUSED[@]} not done"
+    echo "no total: $MISSING"
 fi
 if [ "$TROWS" -gt 0 ] && [ -z "$LOADFAIL" ] && [ "${#REFUSED[@]}" = 0 ]; then
     echo "$RULE"
@@ -511,17 +534,20 @@ if [ "$POWER_OK" = 1 ] && [ -n "$BAT" ] && [ -n "$IDLE" ] && [ -n "$WINDOWS" ]; 
                uwh / 1e6 / u, uwh / 1e6}'
 fi
 
-if [ "${#REFUSED[@]}" != 0 ]; then
+# Anything that is not a measurement goes here, so nothing interrupts the table
+if [ -n "$LOADFAIL" ] || [ "${#REFUSED[@]}" != 0 ]; then
     echo
-    echo "this environment doesn't allow the following tests to run properly:"
-    ( IFS=,; echo "${REFUSED[*]}" ) | sed 's/,/, /g' | fold -s -w 66
-fi
-
-if [ -n "$LOADFAIL" ]; then
-    red "FAILED to run:$LOADFAIL - the tests are missing above; their logs"
-    red "are kept as bm-*.log"
-elif [ "${#REFUSED[@]}" = 0 ]; then
-    rm -f bm-*.log
+    echo "== notes"
+    note () { fold -s -w 74 | sed '2,$s/^/  /;s/ *$//'; }
+    if [ -n "$LOADFAIL" ]; then
+        printf -- '- failed to run: %s. Log at the end of the report in results/\n' \
+            "$(set -- $LOADFAIL; IFS=,; echo "$*" | sed 's/,/, /g')" |
+            note | while IFS= read -r l; do red "$l"; done
+    fi
+    if [ "${#REFUSED[@]}" != 0 ]; then
+        printf -- '- not done due to limitations of the current window manager: %s. Log at the end of the report in results/\n' \
+            "$( IFS=,; echo "${REFUSED[*]}" | sed 's/,/, /g')" | note
+    fi
 fi
 
 # compare_results.sh reads these lines and not the table, whose columns move
@@ -534,4 +560,21 @@ if [ "${#DATA[@]}" != 0 ]; then
         echo "row: $r"
     done
 fi
+
+# Below "== data" so none of it reaches the screen. A refused row keeps its log
+# too: the reason the desktop gave is in there and nowhere else.
+if [ -n "$LOADFAIL" ] || [ "${#REFUSED_LOGS[@]}" != 0 ]; then
+    echo
+    echo "== logs"
+    for t in $LOADFAIL ${REFUSED_LOGS[@]+"${REFUSED_LOGS[@]}"}; do
+        [ "$t" = stress ] && set -- bm-s-*.log || set -- "bm-$t.log"
+        for l in "$@"; do
+            [ -s "$l" ] || continue
+            echo
+            echo "--- $l"
+            cat "$l"
+        done
+    done
+fi
+rm -f bm-*.log
 end_report

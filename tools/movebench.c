@@ -1,17 +1,10 @@
 /*
- * Moving and resizing a window, which is the compositing workload a person
- * actually watches. Everything measured so far has been a window sitting still
- * redrawing its inside; this one makes the window itself move, so the
- * compositor repaints the area it left as well as the area it arrived at, and
- * the window manager reconfigures a frame every step.
- *
  *   movebench <seconds> [move|resize] [steps per second]
  *
  * move walks a circle at a fixed size; resize stays put and changes size.
  *
- * Reports completed steps a second. Each step is synced, so the figure is how
- * fast the whole window manager, X server and compositor can carry a moving
- * window, not how fast this program can ask.
+ * Each step is synced, so the figure is how fast the whole desktop can carry a
+ * moving window, not how fast this program can ask.
  */
 #include <stdio.h>
 #include <stdlib.h>

@@ -1,21 +1,16 @@
 /*
- * The swap presentation paints only the damage and trusts the buffer age to
- * say what the buffer it was handed still holds. If that trust is misplaced
- * the screen keeps pixels from an older frame. This looks for exactly that,
- * in the two ways the retired python checks did:
- *
- *   settled   scroll a known pattern hard, stop, and compare what is on the
- *             screen against the pattern that should be there. Leftovers from
- *             an earlier frame show up as bands of the wrong colour.
- *   stale     photograph a window that is not being drawn to, damage a
- *             different window heavily for a while, and photograph again. The
- *             untouched window must be unchanged, and must still match the
- *             pattern it was given.
- *
- * Replaces scroll_check.py and stale_check.py, whose python-xlib and PIL are
- * no longer installed.
- *
  *   stale_check [rounds]
+ *
+ * A compositor that paints only the damage trusts the buffer age to say what
+ * the buffer it was handed still holds; where that trust is misplaced the
+ * screen keeps pixels from an older frame. Asked two ways:
+ *
+ *   settled   scroll a known pattern hard, stop, and compare the screen with
+ *             the pattern that should be there. Leftovers from an earlier
+ *             frame show up as bands of the wrong colour.
+ *   stale     photograph a window nobody is drawing to, damage a different
+ *             window heavily for a while, and photograph again. The untouched
+ *             one must be unchanged.
  *
  * Exit status 0 when nothing went stale.
  */

@@ -1,18 +1,13 @@
 /*
- * Minimising a window and bringing it back, which nothing here has tested.
- *
- * It is a different path from a menu appearing. The window goes on existing, but
- * it is unmapped, so the compositor frees its pixmap, its GLX pixmap and its
- * texture; restoring it builds all three again for a window it already knows
- * about. Everyone minimises windows, and a leftover or a black restore would be
- * obvious.
- *
- * A band pattern makes it checkable. The check proves the minimise happened
- * rather than assuming it: after minimising, the pattern must be gone from where
- * it was, and a round where it is still there is reported as having proved
- * nothing.
- *
  *   iconify_check [rounds]
+ *
+ * A different path from a menu appearing: the window goes on existing while
+ * unmapped, so the compositor frees what it had built for it and has to build
+ * it again for a window it already knows about.
+ *
+ * The minimise is proved rather than assumed - afterwards the pattern must be
+ * gone from where it was, and a round where it is still there is reported as
+ * having proved nothing.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,7 +46,6 @@ static int colour_index (unsigned long pixel)
     return -1;
 }
 
-/* How many sampled points look like the pattern they should be */
 static int pattern_score (int ox, int oy, int *total)
 {
     bw_image *img;
@@ -153,7 +147,6 @@ int main (int argc, char **argv)
             continue;
         }
 
-        /* Minimise */
         bw_minimize (win);
         bw_sync ();
         usleep (900000);

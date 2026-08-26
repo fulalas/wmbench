@@ -1,18 +1,14 @@
 /*
- * Shaped windows, which window_shape() exists for and nothing has ever checked.
- *
- * A window can declare that it is not a rectangle. The compositor has to draw
- * only the declared part and let whatever is behind show through the rest; get
- * it wrong and a shaped window paints its undefined corners over the desktop.
- * It matters more than it sounds: themes with rounded corners shape the frame,
- * so this is not only an oddity of old applications.
- *
- * A background window is filled with one colour. A shaped window on top of it
- * is filled with another, and shaped to a band down its middle. Inside the band
- * the top colour must show; outside it, within the same bounding box, the
- * background colour must show through.
- *
  *   shape_check [rounds]
+ *
+ * A window can declare that it is not a rectangle, and the compositor has to
+ * draw only the declared part and let what is behind show through the rest; get
+ * it wrong and the undefined corners are painted over the desktop. Themes with
+ * rounded corners shape the frame, so it is not only an oddity of old
+ * applications.
+ *
+ * Inside the band the top window's colour must show; outside it, within the
+ * same bounding box, the background colour must show through.
  *
  * Exit status 0 when the shape was honoured both ways.
  */

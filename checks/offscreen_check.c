@@ -1,20 +1,16 @@
 /*
- * A window hanging off the left and top edges of the screen, which is what
- * happens every time someone drags one there and which nothing here has tested.
- *
- * The compositor works out texture coordinates from screen positions, so for a
- * window at a negative origin those sums involve negative numbers, which is a
- * classic place for an off-by-a-region error. Get it wrong and the visible part
- * of the window shows the wrong part of its contents, shifted.
- *
- * A pattern of square cells whose colour depends on the column and the row
- * together makes that visible, and in both directions: a pattern of rows alone
- * says nothing about the left edge, since sliding it sideways lands on exactly
- * the same colours. With the window at -OFFX,-OFFY, the top left of the screen
- * must show the cell belonging to window pixel OFFX,OFFY, not the one
- * belonging to 0,0.
- *
  *   offscreen_check [rounds]
+ *
+ * A window at a negative origin makes the compositor work out texture
+ * coordinates from negative numbers, which is a classic place for an
+ * off-by-a-region error: get it wrong and the visible part shows the wrong part
+ * of the window, shifted.
+ *
+ * The cells are coloured by column and row together, so the error shows in both
+ * directions: a pattern of rows alone says nothing about the left edge, since
+ * sliding it sideways lands on the same colours. With the window at
+ * -OFFX,-OFFY, the top left of the screen must show the cell belonging to
+ * window pixel OFFX,OFFY, not the one belonging to 0,0.
  *
  * Exit status: 0 the right part was visible, 1 the wrong one was, 2 it could
  * not run, 3 something covered the corner throughout and nothing was proved.

@@ -1,16 +1,9 @@
 /*
- * A starting gun for a mix of programs.
- *
- * The stress test runs six programs together, and each one has to do its own
- * fixed amount of work with all the others already on screen. Left to
- * themselves they start whenever their windows happen to be ready, so the
- * first tasks of the quick ones are done while the slow ones are still
- * appearing - work that belongs to the measurement but was not made under the
- * load the measurement is about.
- *
- * With BENCH_GO set to a file name, a program finishes everything it can do on
- * its own and then waits here. The script arranges the screen, creates the
- * file, and every program starts measuring at once.
+ * Left to themselves the programs in a mix start whenever their own windows
+ * happen to be ready, so the quick ones do their first tasks while the slow
+ * ones are still appearing - work that belongs to the measurement but was not
+ * made under the load the measurement is about. With BENCH_GO set to a file
+ * name, each finishes everything it can do alone and waits here.
  *
  * There is no timeout on purpose: nothing here is ever cut short on the clock.
  * The script that opened the gate is also the one that kills the programs.

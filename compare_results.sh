@@ -111,9 +111,8 @@ function line(first, arr,    i, s) {     # one line of the box
     print s "\342\224\202";
 }
 
-# A table of one line: the numbers a run has only one of. The header block is
-# three lines tall either way, so the name goes in it and the line below is
-# left to the numbers.
+# The header block is three lines tall either way, so the name goes in it and
+# the line below is left to the numbers
 function single(what, title, low,    i, v, best, cells) {
     printf "%s - %s is better, best in bold\n\n", title, low ? "lower" : "higher";
     rule("\342\224\214", "\342\224\254", "\342\224\220");
@@ -147,7 +146,6 @@ function single(what, title, low,    i, v, best, cells) {
     print "";
 }
 
-# One table: which of the two numbers, and what to call it
 function table(idx, title,    i, j, k2, v, best, cells, hdr, blank) {
     printf "%s - lower is better, best in bold\n\n", title;
     rule("\342\224\214", "\342\224\254", "\342\224\220");
@@ -190,8 +188,8 @@ function table(idx, title,    i, j, k2, v, best, cells, hdr, blank) {
                 cells[i] = pad(v, wid[i]);
             }
         }
-        # already padded above. Watts are a rate: the last row of the power
-        # table is the average over the run, and only the seconds ever add up
+        # Watts are a rate: the last row of the power table is the average
+        # over the run, and only the seconds ever add up
         printf "\342\224\202%s", pad((rows[j] == "total" && idx == 1) ?
                                      "average" : rows[j], w0);
         for (i = 1; i <= nkeys; i++) printf "\342\224\202%s", cells[i];
@@ -224,7 +222,7 @@ k == "" { next }
     if (disp[k] == "") disp[k] = d;
     else if (disp[k] != d) mixed[k] = 1;
 }
-# The two a run has only one of, whatever it did. Averaged like the rest.
+# Averaged like the rest
 /^energy:/   { esum[k] += $2; ecnt[k]++ }
 /^speed:/    { ssum[k] += $2; scnt[k]++ }
 

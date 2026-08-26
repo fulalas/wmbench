@@ -1,22 +1,15 @@
 /*
- * Windows appearing and disappearing: menus, tooltips, notifications. The
- * one case where the per-window setup cost dominates rather than the
- * per-frame drawing. The GL renderer has to
- * build a GLX pixmap, a texture and a binding for every window that appears,
- * and the first bind of a new pixmap waits for the server with a round trip;
- * XRender only has to make a picture.
- *
- * A background window gives the compositor something to redraw underneath.
- * The popups are what real menus are - override-redirect windows on X11,
- * xdg_popups of the background window on Wayland - mapped and unmapped in
- * turn at a fixed rate so every renderer is given identical work.
- *
  *   popbench <seconds> [cycles per second] [popups] [width] [height]
  *
- * A small height matters: the GL renderer draws shadows from one shared
- * procedural profile only for windows at least twice the blur radius, and falls
- * back to building a gaussian on the CPU and uploading it for anything
- * smaller. Tooltips are short and wide, so they take the fallback.
+ * The one case where the per-window setup cost dominates rather than the
+ * per-frame drawing: a compositor has to build a texture and a binding for
+ * every window that appears.
+ *
+ * The popups are what real menus are - override-redirect windows on X11,
+ * xdg_popups of the background window on Wayland - mapped and unmapped in turn
+ * at a fixed rate, so every session is given identical work. A small height
+ * matters: shadow drawing often takes a slower path below twice the blur
+ * radius, and tooltips are short and wide.
  */
 #include <stdio.h>
 #include <stdlib.h>

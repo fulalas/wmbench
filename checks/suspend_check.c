@@ -1,17 +1,10 @@
 /*
- * Does the screen come back correctly after compositing suspends and resumes?
- *
- * The "suspend compositing for focused fullscreen windows" option is on by
- * default. When a fullscreen window takes focus the compositor detaches its
- * GLX drawable and unmaps the overlay; when that window goes away it reattaches
- * and has to repaint everything. Nothing here has ever checked that it does.
- * It is a user-visible path, on by default.
- *
- * A known band pattern sits in a window. A second window goes fullscreen,
- * which suspends compositing, then stops being fullscreen, which resumes it.
- * The pattern window must be exactly the pattern afterwards.
- *
  *   suspend_check [rounds]
+ *
+ * Suspending compositing for a focused fullscreen window is common and often
+ * on by default, and resuming means repainting everything. A known band
+ * pattern sits in a window while a second one goes fullscreen and back; the
+ * pattern window must be exactly the pattern afterwards.
  *
  * Exit status 0 when every resume came back clean.
  */

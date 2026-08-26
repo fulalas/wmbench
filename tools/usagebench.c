@@ -1,32 +1,18 @@
 /*
- * A person using the desktop, scripted: two windows go through what real
- * windows go through. Maximize and back. Minimize and back. Walked to the
- * left and right screen edges and snapped to half the screen. Walked to the
- * four corners, clockwise and counter-clockwise, and snapped to a quarter.
- * A text document scrolled smoothly, first with the scroll bar's chevrons
- * and then by dragging its thumb. Resized by dragging each handle, corner and
- * edge, on screen throughout. Icons dragged one by one from one window into
- * another and then all carried back at once. Raised over each other the way
- * alt-tab does. Fullscreen and back.
- *
- * Nothing injects input, so the run is the same on every window manager and
- * display server - which is the point: the numbers are only comparable when
- * every session did identical work.
- *
  *   usagebench <seconds> [actions per second] [phase]
  *
+ * A person using the desktop, scripted. The phase is all (the default),
+ * windows, scroll, resize or dnd, so one part can be measured on its own, and
  * BENCH_TASKS=N runs exactly N passes instead of stopping on the clock.
  *
- * The phase is all (the default), windows, scroll, resize or dnd, so one part
- * can be measured on its own.
+ * Nothing injects input, so the run is the same everywhere - which is the
+ * point: the numbers only compare when every session did identical work.
  *
- * BENCH_CHECKPOINT_DIR=<dir>: run exactly one pass instead of a timed loop,
- * and after every deterministic step write a checkpoint there: a line in
- * manifest.txt with the geometry that was asked for and the geometry the WM
- * actually gave, plus a screenshot of the window's own content (through
- * bw_capture, so it works on Wayland too). Two sessions' checkpoint folders
- * can then be compared pixel by pixel with compare_runs.sh: the content is
- * ours alone, so the desktop's own looks never enter the comparison.
+ * BENCH_CHECKPOINT_DIR=<dir> runs exactly one pass and writes, after every
+ * deterministic step, a line in manifest.txt with the geometry asked for
+ * against the geometry given, plus a screenshot of the window's own content.
+ * The content is ours alone, so the desktop's own looks never enter a
+ * comparison of two sessions' folders.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,62 +29,53 @@
 #define BAND 40
 #define NCOL 6
 
-/* The icon views that drag and drop needs */
 #define ICON    72
 #define CELL   120
 #define COLS      4
 #define NICON     8
-/* The gap the two views keep between them, and the least width one can have */
 #define DNDGAP   40
 #define DNDMINW  (40 + (COLS - 1) * CELL + ICON + 40)
 
 /*
- * Room left around everything: window managers put a frame around the window
- * and a panel at the edges, and a frame that reaches past the screen is
- * handled differently by each of them - KDE pushed it off the display where
- * others let it grow. Every target stays this far inside.
+ * Room left around everything. A frame that reaches past the screen is handled
+ * differently by each desktop - one pushed it off the display where others let
+ * it grow - so every target stays this far inside.
  */
 #define SAFE    120
 
-/* The text document and its scroll bar */
-#define LINEH   22              /* one line of text */
-#define DOCLINES 200            /* how long the document is */
-#define SBW     24              /* the scroll bar */
-#define CHEV    24              /* its chevron buttons */
+#define LINEH   22
+#define DOCLINES 200
+#define SBW     24
+#define CHEV    24
 
 /*
- * The window size actually used, and the patch of screen everything is laid
- * out in: 1920x1080 or the screen if smaller. Maximising, snapping to half
- * the screen and going fullscreen are the window manager's own geometry and
- * use the real screen, sw and sh below.
+ * Everything is laid out in 1920x1080, or the screen if smaller. Maximising,
+ * snapping and going fullscreen are the window manager's own geometry and use
+ * the real screen, sw and sh below.
  */
 static int winw = WINW, winh = WINH;
 static int stage_x, stage_y, stage_w, stage_h;
-static int base_x, base_y;      /* where the pair opens, reopened at the same spot */
+static int base_x, base_y;      /* reopened at the same spot every time */
 static bw_win *wa, *wb, *carrier[4];
 static int sw, sh, actions = 0;
-static bw_win *doc_buf;         /* the document is drawn here, copied once */
-static bw_win *bands_buf;       /* the bands, so a resize copies instead of drawing */
-static bw_win *bands_buf_b;     /* the same for the second window, its own offset */
-static const char *phase;       /* which part of the pass to run */
-static int fixed;               /* a fixed number of passes, not a clock */
-static int doc_px;              /* how far it is scrolled, in pixels */
+static bw_win *doc_buf;         /* drawn once, copied after that */
+static bw_win *bands_buf;       /* so a resize copies instead of drawing */
+static bw_win *bands_buf_b;
+static const char *phase;
+static int fixed;
+static int doc_px;
 static double pace;
 static double run_start, run_seconds;   /* the clock, when there is one */
 static const char *ckdir;
 static FILE *manifest;
 static int cknum;
-static int state_wrong;         /* a state the compositor never granted */
+static int state_wrong;
 
 static const unsigned long palette[NCOL] = {
     0xc04040, 0x40c040, 0x4040c0, 0xc0c040, 0xc040c0, 0x40c0c0
 };
 
-/*
- * Fixed work: BENCH_TASKS=N does exactly N passes of the chosen phase, however
- * long that takes, so every session performs the same amount of work. The
- * measured part is bracketed by the two marks.
- */
+/* However long it takes, so every session performs the same amount of work */
 static long bench_tasks (void)
 {
     const char *e = getenv ("BENCH_TASKS");
@@ -158,11 +135,8 @@ static void draw_content (bw_win *w, int offset)
     bw_present (w);
 }
 
-/*
- * One checkpoint: what was asked, what the WM did, and what the window's own
- * content looks like, saved as a PPM cut to the asked size at the actual
- * position - identical content across sessions unless something differs.
- */
+/* Cut to the asked size at the actual position, so the content is identical
+   across sessions unless something differs */
 static void checkpoint_of (bw_win *w, const char *name,
                            int ax, int ay, int aw, int ah)
 {
@@ -231,7 +205,7 @@ static int time_up (void)
     return !fixed && bench_now () - run_start >= run_seconds;
 }
 
-static int scene_wrong;         /* the windows are not where the phase needs them */
+static int scene_wrong;
 
 /*
  * On Wayland a state is granted or it is not, and the compositor says which
@@ -461,8 +435,8 @@ static void doc_glide (int to, int frames, int press_up, int press_down)
  * The band pattern, drawn once at screen size. A resize then copies from it
  * instead of drawing band by band into the window: one operation a frame, so
  * what is on screen is never half-painted. Drawing straight into the window
- * flickered visibly under KWin and left artifacts under a WM that does not
- * composite at all.
+ * flickered visibly on one desktop and left artifacts on another that does
+ * not composite at all.
  */
 static void bands_ready (void)
 {
@@ -477,7 +451,8 @@ static void bands_ready (void)
      * The pattern is also the window's background. Growing a window exposes
      * new strips, and the server fills them from the background before the
      * application can paint: with a plain colour that is a flash of black
-     * every step (flicker under KWin, artifacts where nothing composites),
+     * every step - a flicker where there is compositing, artifacts where
+     * there is none -
      * and with no background at all the strip is undefined, which reads as
      * the window losing its content. Filled from the pattern it is right
      * either way, so nothing wrong is ever on screen.
@@ -574,7 +549,7 @@ static void drag_resize (int x0, int y0, int w0, int h0,
 
     /*
      * Did it take? A compositor can honour the pager request for the position
-     * and ignore the size (labwc does), and then a resize test resizes
+     * and ignore the size, and then a resize test resizes
      * nothing. What it must not be is a test for "the size we asked for": a
      * window manager is free to grant a smaller one, and one does on the leg
      * that drags the top left corner, and reading that as a refusal flipped
@@ -609,19 +584,16 @@ static void resize_phase (int bx, int by)
     if (bx + gw > stage_x + stage_w) gw = stage_x + stage_w - bx;
     if (by + gh > stage_y + stage_h) gh = stage_y + stage_h - by;
 
-    /* The bottom-right corner */
     drag_resize (bx, by, winw, winh, bx, by, gw, gh, 60);
     checkpoint ("resize-corner", bx, by, gw, gh);
     drag_resize (bx, by, gw, gh, bx, by, winw, winh, 60);
     step ();
 
-    /* The right edge alone */
     drag_resize (bx, by, winw, winh, bx, by, gw, winh, 60);
     checkpoint ("resize-right", bx, by, gw, winh);
     drag_resize (bx, by, gw, winh, bx, by, winw, winh, 60);
     step ();
 
-    /* The bottom edge alone */
     drag_resize (bx, by, winw, winh, bx, by, winw, gh, 60);
     checkpoint ("resize-bottom", bx, by, winw, gh);
     drag_resize (bx, by, winw, gh, bx, by, winw, winh, 60);
@@ -690,7 +662,7 @@ static void hide_carrier (bw_win *c)
      * Let the compositor finish putting the window away before it is asked
      * for again. The X server has it unmapped by now, but a Wayland
      * compositor also tears down the surface behind it, and mapping the same
-     * window again while that is in flight left labwc showing nothing at all
+     * window again while that is in flight left one showing nothing at all
      * - the icon appeared to teleport. BENCH_DND_SETTLE=0 turns the wait off
      * to see the difference.
      */
@@ -743,7 +715,6 @@ static void draw_view (bw_win *w, const char *title, const int *have,
         }
         else
         {
-            /* The gap an icon left behind */
             bw_rect (w, 0xb0b0b0, cx, cy, ICON, ICON);
         }
     }
@@ -850,8 +821,8 @@ static void dnd_phase (int bx, int by)
      *
      * It used to be unmapped after each drop and mapped again for the next
      * drag. That is a fair thing to ask of a compositor - and popbench asks
-     * it twenty times a second - but labwc brings a re-mapped unmanaged
-     * window back in the wrong layer, so the icon was simply not on screen
+     * it twenty times a second - but somewhere a re-mapped unmanaged window
+     * comes back in the wrong layer, so the icon was simply not on screen
      * for whole flights and looked like it teleported. Raising it every frame
      * put it back for a frame at a time, which flickered. Parking instead of
      * cycling keeps the one window and shows every drag.
@@ -882,7 +853,6 @@ static void dnd_phase (int bx, int by)
         snprintf (ckname, sizeof ckname, "dnd-lift-%d", k + 1);
         checkpoint_of (va, ckname, lx, by, winw, winh);
 
-        /* Carried across in an arc, the way a hand moves */
         for (f = 1; f <= 55 && !time_up (); f++)
         {
             double t = (double) f / 55.0;
@@ -900,7 +870,6 @@ static void dnd_phase (int bx, int by)
             usleep (16000);
         }
 
-        /* Dropped: the album has it now */
         album[nalbum++] = i;
         draw_view (vb, "Album", album, nalbum, 0);
 
@@ -1020,8 +989,8 @@ static void dnd_phase (int bx, int by)
  * land on a layer surface however placeable those are.
  *
  * Every other phase needs its own coordinates, and asking a manager for them
- * is not enough: labwc put both windows in one place and the second was never
- * seen at all, so those runs composited one window where the X11 runs
+ * is not enough: one put both windows in the same place and the second was
+ * never seen at all, so those runs composited one window where the X11 runs
  * composited two. They go unmanaged on both sides instead, which is the one
  * scene rather than two that look alike.
  */
@@ -1057,12 +1026,8 @@ static bw_win *make_window (int x, int y, const char *name, int stated)
  */
 static int pair_stated = -1;
 
-static void pair_kind (int stated)
+static void pair_open (int stated)
 {
-    if (pair_stated == stated)
-    {
-        return;
-    }
     if (pair_stated >= 0)
     {
         /* The travel it recorded is kept; the pointer must not be, or the
@@ -1087,6 +1052,14 @@ static void pair_kind (int stated)
        toplevel whose first configure has not arrived are refused, and the
        phase reports that as a state the compositor never granted */
     sleep (1);
+}
+
+static void pair_kind (int stated)
+{
+    if (pair_stated != stated)
+    {
+        pair_open (stated);
+    }
 }
 
 int main (int argc, char **argv)
@@ -1212,8 +1185,8 @@ int main (int argc, char **argv)
      * The pattern becomes both windows' background before anything resizes
      * them. Every strip a window gains - maximised, snapped, dragged wider -
      * is then filled by the server from the pattern. Without it the new area
-     * is undefined, and undefined is not the same thing twice: mutter left
-     * the old pixels in the corner where xfwm4 and kwin left black.
+     * is undefined, and undefined is not the same thing twice: one left the
+     * old pixels in the corner where others left black.
      */
     bands_ready ();
     draw_content (wa, 0);
@@ -1246,9 +1219,14 @@ int main (int argc, char **argv)
     {
       if (want_phase ("windows"))
       {
+        /* The pass before left its window minimized, and only a pair that is
+           still the managed one is that window: any other has been remade */
+        if (pass > 0 && pair_stated == 1)
+        {
+            pair_open (1);
+        }
         pair_kind (1);
 
-        /* Maximize and back */
         for (i = 0; i < 2 && (fixed || bench_now () - start < seconds); i++)
         {
             bw_maximize (wa, 1);
@@ -1257,19 +1235,6 @@ int main (int argc, char **argv)
             bw_maximize (wa, 0);
             step ();
             expect_state (wa, BW_STATE_MAX, 0, "unmaximize");
-        }
-
-        /* Minimize and back */
-        for (i = 0; i < 2 && (fixed || bench_now () - start < seconds); i++)
-        {
-            bw_minimize (wa);
-            step ();
-            bw_restore (wa);
-            bw_raise (wa);
-            /* Politely, or GNOME posts a notification instead of focusing */
-            bw_activate (wa);
-            step ();
-            expect_state (wa, BW_STATE_ACTIVE, 1, "the restore from minimize");
         }
 
         /* To the middle of each side edge, snapped to half the screen */
@@ -1364,13 +1329,18 @@ int main (int argc, char **argv)
             step ();
         }
 
-        /* Fullscreen and back */
         bw_fullscreen (wa, 1);
         step ();
         expect_state (wa, BW_STATE_FULLSCREEN, 1, "fullscreen");
         bw_fullscreen (wa, 0);
         step ();
         expect_state (wa, BW_STATE_FULLSCREEN, 0, "leaving fullscreen");
+
+        /* Last of the phase, and left minimized: bringing one back is refused
+           where no protocol lets a client ask, and a pass that ends here is one
+           every desktop runs alike */
+        bw_minimize (wa);
+        step ();
       }
         pass++;
     } while (tasks > 0 ? pass < tasks

@@ -1,26 +1,15 @@
 /*
- * A fullscreen or windowed OpenGL benchmark in an ordinary window.
- *
- * It never sets _NET_WM_BYPASS_COMPOSITOR and is not an override redirect
- * window, so it is the kind of application a compositor keeps compositing for.
- * Windowed is the interesting mode for comparing renderers, since then every
- * frame it draws has to be composited.
- *
  *   fsbench <seconds> [windowed] [target fps]
  *
- * BENCH_BYPASS=1 sets _NET_WM_BYPASS_COMPOSITOR on the window, which is how
- * a player or a game asks the compositor to step aside while it is
- * fullscreen. Without it, whether compositing stops is the window manager's
- * own decision.
- *
- * Wayland has no such property: a compositor decides by itself whether a
- * fullscreen surface can go straight to the screen, and it will not while it
- * has to be told what is behind the surface. So there BENCH_BYPASS declares
- * the whole surface opaque, which is the thing a player does that makes the
- * surface eligible; the buffer already matches the output.
- *
- * A target frame rate holds the application steady, so two renderers can be
+ * An ordinary window, so it is the kind of application a compositor keeps
+ * compositing for. A target frame rate holds it steady, so two sessions are
  * given exactly the same amount of work.
+ *
+ * BENCH_BYPASS=1 sets _NET_WM_BYPASS_COMPOSITOR, which is how a player asks
+ * compositing to step aside while it is fullscreen. Wayland has no such
+ * property - there the compositor decides by itself, and will not while it has
+ * to be told what is behind the surface - so BENCH_BYPASS declares the whole
+ * surface opaque instead, which is what makes it eligible.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -110,7 +99,6 @@ static GLuint compile (GLenum type, const char *src)
     return s;
 }
 
-/* Everything one swapchain needs, whichever protocol carries it */
 static Display *xd;
 static Window xwin;
 static GLXContext glx_ctx;

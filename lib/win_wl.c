@@ -1430,8 +1430,8 @@ static void wl_map (bw_win *win)
              * one from the window manager, but a Wayland toplevel is bare
              * unless the client requests server-side decoration - and a
              * bare window is less for the compositor to draw than the X11
-             * run gives it. Where the protocol is missing (mutter) there is
-             * no frame to ask for, which is that session's own truth.
+             * run gives it. Where the protocol is missing there is no frame
+             * to ask for, which is that session's own truth.
              */
             if (deco_mgr != NULL)
             {
@@ -1609,8 +1609,8 @@ static void wl_restore (bw_win *win)
      * The way a taskbar unminimises: through the foreign-toplevel list, which
      * is the Wayland shape of the pager request the X11 side sends. It is
      * asked first because an xdg-activation token made without an input
-     * serial is refused outright by wlroots compositors, and the token was
-     * all a minimised window had.
+     * serial is refused outright by some compositors, and the token was all a
+     * minimised window had.
      */
     if (ftl_mgr != NULL && seat != NULL && win->name[0] != '\0')
     {

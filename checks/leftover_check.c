@@ -1,18 +1,14 @@
 /*
- * The screen before a load against the same screen after it.
- *
  *   leftover_check save <file>    photograph the idle screen now
  *   leftover_check check <file>   photograph it again and compare
  *
- * An idle screen that nobody touched has to come back to the pixels it had.
- * What differs is what the compositor drew and never took back: garbage left
- * where a window used to be, a region it never repainted.
+ * An idle screen nobody touched has to come back to the pixels it had; what
+ * differs is what the compositor drew and never took back.
  *
- * Only the desktop around the windows is judged. Every window that is on
- * screen is left out of the comparison, because a clock in a panel or a
- * terminal with output in it changes on its own and says nothing about the
- * compositor. What the load's own windows leave behind is on the desktop by
- * then, which is exactly what is looked at.
+ * Only the desktop around the windows is judged. Every window on screen is left
+ * out, because a clock in a panel or a terminal with output in it changes on
+ * its own and says nothing about the compositor. What the load's own windows
+ * left behind is on the desktop by then, which is what is looked at.
  *
  * save photographs twice, a second apart, and refuses the job if even the
  * desktop is changing on its own.
@@ -240,7 +236,6 @@ int main (int argc, char **argv)
 
         return 3;
     }
-    /* The window tree, asked of X11 directly */
     d = XOpenDisplay (NULL);
     if (d == NULL)
     {
@@ -276,7 +271,6 @@ int main (int argc, char **argv)
         }
         bw_image_free (img);
 
-        /* Is this screen still at all? */
         sleep (1);
         img = bw_capture (0, 0, wa.width, wa.height);
         if (img == NULL)

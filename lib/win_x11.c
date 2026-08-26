@@ -1,5 +1,5 @@
-/* The bodies here are the suite's original Xlib code, moved behind the bw_
-   calls unchanged, so an X11 run measures what it measured before the split */
+/* The suite's original Xlib code, moved behind the bw_ calls unchanged, so an
+   X11 run measures what it measured before the split */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -200,8 +200,9 @@ static Time server_time (Window w)
 
 /*
  * Raising or focusing a window without a real user timestamp reads as focus
- * stealing, and GNOME answers with a "window is ready" notification instead
- * of doing it. This asks the way a pager does, with the server's own time.
+ * stealing, and one desktop answers with a "window is ready" notification
+ * instead of doing it. This asks the way a pager does, with the server's own
+ * time.
  */
 static void x11_activate (bw_win *win)
 {

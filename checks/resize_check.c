@@ -1,28 +1,19 @@
 /*
- * A frame drawn from a pixmap that was not ready yet, caught the way
- * motion_check catches tearing rather than by trying to photograph a black
- * frame in the act.
- *
- * A window is given a band pattern whose offset advances every step, and it is
- * resized every step as well, which is what hands it a new pixmap. A fixed
- * region well inside the smallest size it takes is captured each time. Every
- * capture has to be explainable by one single offset of the pattern: a frame
- * drawn from an unready pixmap is not, because it holds something that is not
- * the pattern at any offset.
- *
- * This is the detector the previous attempt lacked. Photographing the screen in
- * a tight loop never saw anything, in any present mode, with or without the
- * read that is supposed to prevent it, so it proved nothing. A pattern that is
- * always moving does not have to be caught at the right instant.
- *
  *   resize_check [steps] [managed]
  *
- * The managed mode lets the window manager frame the window, which is the case
- * the comment on wait_for_pixmap() was measuring; the window's position moves as
- * it is reframed, so it is looked up every step.
+ * A frame drawn from a buffer that was not ready yet. The window carries a band
+ * pattern whose offset advances every step and is resized every step, which is
+ * what hands it a new buffer, and a fixed region well inside its smallest size
+ * is captured each time. Every capture has to be explainable by one single
+ * offset: a frame drawn from an unready buffer is not. A pattern that is always
+ * moving does not have to be caught at the right instant, which is why
+ * photographing in a tight loop proved nothing.
+ *
+ * The managed mode lets the window manager frame the window; its position moves
+ * as it is reframed, so it is looked up every step.
  *
  * Exit status: 0 every capture was one coherent frame, 1 one was not, 2 it
- * could not run, 3 it was covered throughout and proved nothing. See the README.
+ * could not run, 3 it was covered throughout and proved nothing.
  */
 #include <stdio.h>
 #include <stdlib.h>

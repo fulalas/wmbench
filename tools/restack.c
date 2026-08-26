@@ -1,18 +1,15 @@
 /*
- * Put windows in a known order, bottom first:
- *
  *   restack "fsbench" "transbench background" "movebench"
  *
- * The stress mix starts six programs at once, and the order they end up
- * stacked in is whatever the window manager happened to do with them. That
- * decides which windows are covered, and a covered window is not composited -
- * so the same test could measure noticeably different amounts of work from
- * one run to the next. Naming the order makes every run identical.
+ * Bottom first. Left alone, the stacking order is whatever the window manager
+ * happened to do, and that decides which windows are covered; a covered window
+ * is not composited, so the same test measures different amounts of work from
+ * one run to the next.
  *
- * A name may match several windows (the many-window filler); all of them are
- * raised, in the order the server lists them. The window with the name is the
- * client, and it is the client that is named in the request: see ask_raise()
- * for why raising the frame the window manager put around it does nothing.
+ * A name may match several windows; all of them are raised, in the order the
+ * server lists them. The window with the name is the client, and it is the
+ * client that is named in the request: see ask_raise() for why raising the
+ * frame put around it does nothing.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -182,7 +179,6 @@ static int raise_matching (Window w, const char *name, int depth)
     return raised;
 }
 
-/* Is there a viewable window of this name yet? */
 static int have_window (Window w, const char *name, int depth)
 {
     Window r, parent, *kids = NULL;

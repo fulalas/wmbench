@@ -1,16 +1,13 @@
 /*
- * A client-side-decorated window, which is what every GTK3 and GTK4
- * application is and what no other benchmark here measures: 32-bit ARGB
- * pixels, full window opacity, and an opaque region declaring everything
- * except a margin for its own rounded corners and shadow.
- *
- * The compositor cannot treat such a window as opaque, so by default it blends
- * the whole of it every frame, which reads the destination as well as the
- * texture. Only the margin actually needs that.
- *
  *   argbbench <seconds> [steps per second] [margin]
  *
  * BENCH_TASKS=N does N steps instead of running for the seconds given.
+ *
+ * A client-side-decorated window, which is what every modern toolkit makes:
+ * 32-bit ARGB pixels, full window opacity, and an opaque region declaring
+ * everything except a margin for its own rounded corners and shadow. Only that
+ * margin needs blending, and a compositor that blends the whole window every
+ * frame reads the destination as well as the texture for nothing.
  */
 #include <stdio.h>
 #include <stdlib.h>

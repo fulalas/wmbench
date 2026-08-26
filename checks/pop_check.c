@@ -1,18 +1,10 @@
 /*
- * Does what a menu covered come back correctly?
- *
- * stale_check covers a window nobody is drawing to while another is hammered,
- * and motion_check covers tearing during motion, but neither covers a window
- * appearing over another and going away again. That is the commonest thing a
- * compositor does after drawing: every menu, tooltip and notification. The
- * area a popup covered has to be repainted from the window underneath when it
- * unmaps, and nothing here has ever checked that it is.
- *
- * A known band pattern sits in a window. Popups, the way real menus are, are
- * mapped over it and unmapped again, many times. Then the pattern window is
- * captured and must still be exactly the pattern.
- *
  *   pop_check [rounds]
+ *
+ * Does what a menu covered come back correctly? The area a popup covered has
+ * to be repainted from the window underneath when it unmaps. A known band
+ * pattern sits in a window, popups are mapped over it and unmapped again many
+ * times, and the pattern window must still be exactly the pattern.
  *
  * Exit status 0 when nothing was left behind.
  */

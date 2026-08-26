@@ -1,16 +1,10 @@
 /*
- * Translucency. Nothing else here asks the compositor to blend a whole
- * managed window uniformly: argbbench hands it per-pixel alpha and popbench
- * hands it shadows. Yet a translucent terminal over a busy window is one of
- * the commonest things on a real desktop, and it is the case where the
- * compositor cannot just copy: it has to read what is underneath and blend.
- *
- * A detailed opaque window sits underneath. A second window on top carries
- * the opacity - _NET_WM_WINDOW_OPACITY on X11, wp-alpha-modifier on Wayland -
- * and redraws at a fixed rate, so every step forces the compositor to repaint
- * the background there and blend the top window over it.
- *
  *   transbench <seconds> [opacity 0..1] [steps per second]
+ *
+ * The case where the compositor cannot just copy: it has to read what is
+ * underneath and blend. A detailed opaque window sits underneath, and a second
+ * window on top carries the opacity - _NET_WM_WINDOW_OPACITY on X11,
+ * wp-alpha-modifier on Wayland - and redraws at a fixed rate.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -128,7 +122,7 @@ int main (int argc, char **argv)
     if (fg_up)
     {
         bw_raise (fg);
-        /* Politely, or GNOME posts a notification instead of raising */
+        /* Politely, or somewhere it becomes a notification, not a raise */
         bw_activate (fg);
         bw_sync ();
         sleep (1);

@@ -27,7 +27,6 @@ power_unlock
 detect_wm || { echo "cannot tell what window manager this is"; exit 1; }
 ST=$(session_type)
 
-# Everything below goes to the screen and to a result file
 DE=$(echo "${XDG_CURRENT_DESKTOP:-unknown}" | tr '[:upper:]' '[:lower:]' | tr ':/ ' '-')
 OUT="results/validate-$(date +%Y%m%d-%H%M%S)-$(hostname)-$DE-$WM_NAME-$ST.txt"
 mkdir -p results
@@ -76,15 +75,12 @@ else
     MOTION=25; RESIZE=120; CHK=3
 fi
 
-# What went wrong, and what this compositor does not do at all, in the words
-# the verdict at the end repeats back
+# Kept in the words the verdict at the end repeats back
 FAILURES=()
 UNPROVEN=()
 BROKEN=()
 fail () { FAILURES+=("$1"); }
 
-# One line of result, and the check's own words kept back for the verdict. The
-# statuses are the suite's four; see the README.
 #   0 passed  1 the compositor is at fault  2 could not run  3 proved nothing
 report () {                     # $1 label, $2 status, $3 what it said
     printf '  %-16s ' "$1"
@@ -106,7 +102,7 @@ alive () {
     return 1
 }
 
-# The same checks for every WM
+# The same checks everywhere, or the verdicts do not compare
 CHECKS="motion stale pop suspend shape resize offscreen iconify"
 
 if [ "$PIXELS" = 1 ]; then
@@ -131,9 +127,8 @@ fi
 
 echo
 
-# The checkpoints: geometry asked for against geometry got, and a photograph of
-# the window's own content at each step, so a compositor that quietly ignores a
-# move is caught. Named at the end of the run, not talked about here.
+# Geometry asked for against geometry got, and a photograph of the window's own
+# content at each step, so a compositor that quietly ignores a move is caught
 CK="results/frames-$(date +%Y%m%d-%H%M%S)-$(hostname)-$DE-$WM_NAME-$ST"
 mkdir -p "$CK"
 BENCH_CHECKPOINT_DIR="$CK" timeout "$BENCH_RUN_TIMEOUT" \
@@ -151,19 +146,18 @@ if [ "$PIXELS" = 1 ]; then
 fi
 
 echo "== stability"
-# Everything at once, and all of it at the same time: the mix, the work each
-# load does and the order they are stacked in all come from lib/common.sh, so
-# this is the same load benchmark.sh measures. manywin is scenery: it counts
-# nothing, and is held until killed rather than going away part way through.
+# The mix, the work each load does and the order they stack in all come from
+# lib/common.sh, so this is the same load benchmark.sh measures. manywin is
+# scenery: it counts nothing, and is held until killed rather than going away
+# part way through.
 GO="$PWD/va-stress.go"; rm -f "$GO"
 stress_start "$GO" va
 M=$STRESS_SCENERY_PID
 
-# The same question motion_check asks on an idle screen, asked of a compositor
-# that is busy: a known pattern scrolling in a window kept on top, every capture
-# having to be one single frame of it. It waits at the gate with the rest, so it
-# looks during the load and not around it, and its captures are spread over the
-# load rather than taken flat out, which would be a load of its own.
+# The same question motion_check asks on an idle screen, asked of a busy one.
+# It waits at the gate with the rest, so it looks during the load and not around
+# it, and its captures are spread over the load rather than taken flat out,
+# which would be a load of its own.
 LP=""
 if [ "$PIXELS" = 1 ]; then
     : > va-load.txt
@@ -174,10 +168,6 @@ if [ "$PIXELS" = 1 ]; then
 fi
 
 stress_wait_ready
-# The windows went up one at a time, in order, so the stack is already the
-# named one. The pattern being watched is the exception: it is started after
-# the others and has to be on top, or it would be photographing somebody
-# else's window.
 STACK_OK=1
 stress_settle || STACK_OK=0
 [ "${STRESS_LATE:-0}" = 1 ] && STACK_OK=0
