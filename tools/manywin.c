@@ -57,7 +57,7 @@ int main (int argc, char **argv)
 
         return 2;
     }
-    bw_stage (60, &sx, &sy, &sw, &sh);
+    bw_stage (STAGE_MARGIN, &sx, &sy, &sw, &sh);
     cols = sw / (WINW + 40);
     if (cols < 1)
     {

@@ -8,9 +8,19 @@
  * one of them keeps a strip of its own on screen. A window covered whole is
  * not composited at all on most compositors, and it cannot be found in a
  * screenshot either.
+ *
+ * Every load that shares the frame asks bw_stage for STAGE_MARGIN, fsbench
+ * included: it is the window under the others, and the strips are counted in
+ * from its edge. One of them keeping a margin of its own would move that edge
+ * and no compiler would say so.
+ *
+ * A stage can be narrower than the steps need - bw_stage promises a width of
+ * 1 and nothing more - so a width worked out from them is floored rather than
+ * handed to bw_create as it comes.
  */
 #define STAGE_MARGIN 60
 #define STAGE_STRIP  50
+#define STAGE_MINW   80
 
 /*
  * Say where a window was put against where it was asked to go. Prints one
@@ -61,6 +71,11 @@ void bench_flip_way (void);
  */
 void bench_watch (bw_win *);
 int  bench_moved (void);
+
+/* Before a watched window is destroyed. The box is kept by pointer, and the
+   allocator hands the same address out again: without this the window opened
+   next goes on widening the box the old one left */
+void bench_unwatch (bw_win *);
 
 /* On Wayland, the second half of the proof: one screenshot at the believed
    spot after MEASURE-END, before the window goes away. X11 needs none. */

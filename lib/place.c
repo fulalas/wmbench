@@ -146,13 +146,47 @@ void bench_watch (bw_win *w)
 /* Far enough that no frame, shadow or rounding could account for it */
 #define REALLY_MOVED 60
 
+/* What a window that has gone away left behind. Its box cannot be kept: the
+   allocator hands the same address to the window opened next, and then the
+   two of them widen one box - the reading this table is built to avoid */
+static int retired_looked, retired_moved;
+
+static int box_moved (int i)
+{
+    return (seen[i].x1 - seen[i].x0) >= REALLY_MOVED ||
+           (seen[i].y1 - seen[i].y0) >= REALLY_MOVED;
+}
+
+void bench_unwatch (bw_win *w)
+{
+    int i;
+
+    for (i = 0; i < WATCHED; i++)
+    {
+        if (seen[i].w == w && seen[i].n > 0)
+        {
+            if (seen[i].n >= 2)
+            {
+                retired_looked = 1;
+                retired_moved |= box_moved (i);
+            }
+            seen[i].w = NULL;
+            seen[i].n = 0;
+        }
+    }
+}
+
 int bench_moved (void)
 {
-    int i, looked = 0;
+    int i, looked = retired_looked;
 
     if (!wl_verified)
     {
         return 0;
+    }
+    if (retired_moved)
+    {
+        return 1;
     }
     for (i = 0; i < WATCHED; i++)
     {
@@ -161,8 +195,7 @@ int bench_moved (void)
             continue;
         }
         looked = 1;
-        if ((seen[i].x1 - seen[i].x0) >= REALLY_MOVED ||
-            (seen[i].y1 - seen[i].y0) >= REALLY_MOVED)
+        if (box_moved (i))
         {
             return 1;
         }

@@ -70,7 +70,7 @@ int main (int argc, char **argv)
     }
     int npop = (argc > 3) ? atoi (argv[3]) : 6;
     int i, j, cycles = 0;
-    int bgw, bgh, bgx, bgy, maxx, maxy, sx, sy, sw, sh, fx, fy, fw, fh;
+    int bgw, bgh, bgx, bgy, maxx, maxy, sx, sy, sh, fx, fy, fw, fh;
     long tasks, warm, done = 0;
     double mstart;
 
@@ -88,7 +88,7 @@ int main (int argc, char **argv)
         return 2;
     }
 
-    bw_stage (80, &sx, &sy, &sw, &sh);
+    bw_stage (80, &sx, &sy, NULL, &sh);
     bw_stage (STAGE_MARGIN, &fx, &fy, &fw, &fh);
     /*
      * Right edges in steps of STRIP, counted from the frame every load shares
@@ -100,6 +100,10 @@ int main (int argc, char **argv)
      */
     bgh = MIN (BGH, sh);
     bgw = MIN (BGW, fx + fw - STAGE_STRIP - sx);
+    if (bgw < STAGE_MINW)
+    {
+        bgw = STAGE_MINW;
+    }
     bgx = fx + fw - STAGE_STRIP - bgw;
     bgy = sy;
     /* How far along and down the popups may march before starting again */

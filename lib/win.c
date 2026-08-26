@@ -53,9 +53,12 @@ int bw_is_wayland (void)
 
 void bw_screen_size (int *w, int *h) { ops->screen_size (w, h); }
 
+/* NULL for an answer the caller has no use for; the backends write all four */
 void bw_stage (int margin, int *x, int *y, int *w, int *h)
 {
-    ops->stage (margin, x, y, w, h);
+    int dx, dy, dw, dh;
+
+    ops->stage (margin, x ? x : &dx, y ? y : &dy, w ? w : &dw, h ? h : &dh);
 }
 
 bw_win *bw_create (bw_win *parent, int x, int y, int w, int h,

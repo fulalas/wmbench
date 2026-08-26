@@ -1065,6 +1065,9 @@ static void pair_kind (int stated)
     }
     if (pair_stated >= 0)
     {
+        /* The travel it recorded is kept; the pointer must not be, or the
+           window opened next inherits this one's box. See place.c */
+        bench_unwatch (wa);
         bw_destroy (wa);
         bw_destroy (wb);
     }
@@ -1080,6 +1083,10 @@ static void pair_kind (int stated)
         draw_content (wb, 3 * BAND);
     }
     bw_sync ();
+    /* The same room to settle the first pair is given. States asked of a
+       toplevel whose first configure has not arrived are refused, and the
+       phase reports that as a state the compositor never granted */
+    sleep (1);
 }
 
 int main (int argc, char **argv)
@@ -1215,6 +1222,18 @@ int main (int argc, char **argv)
     sleep (1);
 
     tasks = bench_tasks ();
+    /*
+     * A whole pass swaps the pair between phases, and a swap opens two windows
+     * and repaints the screen twice. Counted work must not include that, so
+     * the two are refused together rather than measured wrongly.
+     */
+    if (tasks > 0 && strcmp (phase, "all") == 0)
+    {
+        fprintf (stderr, "a fixed count needs one named phase, not the whole "
+                         "pass\n");
+
+        return 2;
+    }
     fixed = (tasks > 0 || ckdir != NULL);
     if (tasks > 0)
     {

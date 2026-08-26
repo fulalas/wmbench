@@ -35,6 +35,7 @@
 #include "gate.h"
 #include "now.h"
 #include "win.h"
+#include "place.h"
 
 static const char *vs_src =
     "void main (void) { gl_Position = gl_Vertex; }\n";
@@ -165,7 +166,7 @@ int main (int argc, char **argv)
         int room_w, room_h;
 
         /* Inside the area the benchmark may use, wherever that is */
-        bw_stage (60, &wx, &wy, &room_w, &room_h);
+        bw_stage (STAGE_MARGIN, &wx, &wy, &room_w, &room_h);
         ww = (argc > 4) ? atoi (argv[4]) : 2400;
         wh = (argc > 5) ? atoi (argv[5]) : 1400;
         if (ww > room_w) ww = room_w;

@@ -140,24 +140,25 @@ record () {                     # $1 name, $2 timeout, $3... the load
     timeout -k 2 "$to" "$@" > "$DIR/$(printf '%02d' $NUM)-$name.log" 2>&1
     rc=$?
     rec_stop
-    if [ "$rc" = 124 ]; then
-        echo "recorded (cut at ${to}s, its pass is longer)"
-        echo "$(basename "$file"): cut at ${to}s" >> "$MAN"
-    elif [ "$rc" = 3 ]; then
+    if [ "$rc" = 3 ]; then
         # 3 is the suite's refusal channel, not a failure: on a compositor
         # without layer-shell most of these have nothing to ask for, and a
         # video of a test that never ran is not a test that broke
         echo "nothing to record, this session refused"
         echo "$(basename "$file"): not done, this session refused" >> "$MAN"
+    elif [ ! -s "$file" ]; then
+        # Ahead of the status, not after it: rec_start only sees the recorder's
+        # first second, and a test cut at its timeout is the one whose recorder
+        # ran longest and had the most chance to die. Checked last, that test
+        # went into the manifest as recorded with nothing behind it
+        red "FAILED (no video, see $DIR/recorder.log)"
+        echo "$(basename "$file"): FAILED, no video" >> "$MAN"
+    elif [ "$rc" = 124 ]; then
+        echo "recorded (cut at ${to}s, its pass is longer)"
+        echo "$(basename "$file"): cut at ${to}s" >> "$MAN"
     elif [ "$rc" != 0 ]; then
         red "FAILED (status $rc, see the log)"
         echo "$(basename "$file"): FAILED status $rc" >> "$MAN"
-    elif [ ! -s "$file" ]; then
-        # rec_start only sees the first second of it. A recorder that dies
-        # part way through leaves the test looking recorded with nothing
-        # behind it, which is worse than saying it failed
-        red "FAILED (no video, see $DIR/recorder.log)"
-        echo "$(basename "$file"): FAILED, no video" >> "$MAN"
     else
         echo "recorded"
         echo "$(basename "$file"): ok" >> "$MAN"
@@ -189,7 +190,8 @@ stress_wait_ready
 STACK_OK=1
 stress_settle || STACK_OK=0
 [ "${STRESS_LATE:-0}" = 1 ] && STACK_OK=0
-rec_start "$(printf '%s/%02d-stress.mp4' "$DIR" "$NUM")"
+SFILE=$(printf '%s/%02d-stress.mp4' "$DIR" "$NUM")
+rec_start "$SFILE"
 : > "$GO"
 # The sleep in there is a process of its own and outlives the subshell that
 # holds it, so it is kept off this script's output and reaped with its parent
@@ -204,7 +206,6 @@ pkill -P "$WD" 2>/dev/null; kill $WD 2>/dev/null; wait $WD 2>/dev/null
 rec_stop
 kill $MANY 2>/dev/null; wait $MANY 2>/dev/null
 rm -f "$GO"
-SFILE=$(printf '%s/%02d-stress.mp4' "$DIR" "$NUM")
 if [ ! -s "$SFILE" ]; then
     red "FAILED (no video, see $DIR/recorder.log)"
     echo "$(basename "$SFILE"): FAILED, no video" >> "$MAN"
