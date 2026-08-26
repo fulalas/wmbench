@@ -647,19 +647,32 @@ detect_wm () {
     [ -n "$WM_NAME" ]
 }
 
+# Tried for real, not just found: a tool is installed on desktops whose
+# compositor refuses to hand the screen out, and then every proof answers
+# "could not look" while the report says a tool was found.
 pick_capture_cmd () {
-    local t helper="$(dirname "${BASH_SOURCE[0]}")/capture_ppm.sh"
+    local t cmd tmp helper="$(dirname "${BASH_SOURCE[0]}")/capture_ppm.sh"
 
-    if command -v grim >/dev/null; then
-        echo "grim -t ppm"
-        return 0
-    fi
-    # The others produce PNG; the helper converts it with ffmpeg
-    if command -v ffmpeg >/dev/null; then
-        for t in "gnome-screenshot -f" "spectacle -b -n -o"; do
-            command -v "${t%% *}" >/dev/null && { echo "$helper $t"; return 0; }
-        done
-    fi
+    tmp=$(mktemp --suffix=.ppm) || return 1
+    # The last two produce PNG; the helper converts it with ffmpeg
+    for t in "grim -t ppm" "gnome-screenshot -f" "spectacle -b -n -o"; do
+        command -v "${t%% *}" >/dev/null || continue
+        case "$t" in
+            grim*) cmd=$t;;
+            *)     command -v ffmpeg >/dev/null || continue
+                   cmd="$helper $t";;
+        esac
+        : > "$tmp"
+        # Bounded: one of these asks a portal, which waits on a dialog nobody
+        # is there to click, and the run would hang before its first line
+        if timeout 10 $cmd "$tmp" >/dev/null 2>&1 && [ -s "$tmp" ]; then
+            rm -f "$tmp"
+            echo "$cmd"
+
+            return 0
+        fi
+    done
+    rm -f "$tmp"
 
     return 1
 }

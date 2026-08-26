@@ -60,7 +60,7 @@ if [ "$ST" = wayland ]; then
         echo "captures:   $CAP (Wayland screenshots; slower than X11)"
     else
         PIXELS=0
-        echo "captures:   no Wayland screenshot tool found; the compositor"
+        echo "captures:   no Wayland screenshot tool found; the window manager"
         echo "            must hand the screen out (grim on labwc/COSMIC/sway,"
         echo "            gnome-screenshot on GNOME, spectacle on KDE);"
         echo "            the pixel checks are skipped"
@@ -81,13 +81,13 @@ UNPROVEN=()
 BROKEN=()
 fail () { FAILURES+=("$1"); }
 
-#   0 passed  1 the compositor is at fault  2 could not run  3 proved nothing
+#   0 passed  1 the window manager is at fault  2 could not run  3 not done
 report () {                     # $1 label, $2 status, $3 what it said
     printf '  %-16s ' "$1"
     case $2 in
         0) green passed;;
         2) echo "could not run"; BROKEN+=("$1: $3");;
-        3) echo "not available"; UNPROVEN+=("$1");;
+        3) echo "not done"; UNPROVEN+=("$1");;
         *) red failed; fail "$1: $3";;
     esac
 }
@@ -97,8 +97,8 @@ report () {                     # $1 label, $2 status, $3 what it said
 alive () {
     [ -n "$WM_PID" ] || return 0
     [ -r "/proc/$WM_PID/stat" ] && return 0
-    red "  THE COMPOSITOR DIED"
-    fail "the compositor died"
+    red "  THE WINDOW MANAGER DIED"
+    fail "the window manager died"
     return 1
 }
 
@@ -206,7 +206,7 @@ alive
 if [ "$ST" = x11 ]; then
     # Still answering, not just still running
     xprop -root _NET_SUPPORTING_WM_CHECK >/dev/null 2>&1 ||
-        fail "the compositor stopped answering while everything ran at once"
+        fail "the window manager stopped answering while everything ran at once"
 fi
 printf '  %-16s ' survived
 [ "${#FAILURES[@]}" = "$WAS" ] && green passed || red failed
@@ -219,7 +219,7 @@ printf '  %-16s ' survived
 # designed. Said here so the verdict is not read as covering it.
 for l in "${STRESS_LOGS[@]}"; do
     grep -q MOVE-NEVER-HAPPENED "$l" 2>/dev/null &&
-        echo "  the compositor would not move a window it manages, so the" &&
+        echo "  the window manager would not move a window it manages, so the" &&
         echo "  load above was a different scene from other sessions'" && break
 done
 
@@ -259,14 +259,14 @@ if [ "${#UNPROVEN[@]}" != 0 ] || [ "${#BROKEN[@]}" != 0 ]; then
     echo
     echo "== notes"
     if [ "${#UNPROVEN[@]}" != 0 ]; then
-        echo "  the following tests are not available for this compositor:"
+        echo "  the following tests are not done by this window manager:"
         for u in "${UNPROVEN[@]}"; do
             echo "    $u"
         done
         if [ "$ST" = wayland ]; then
             echo "  on wayland, shape_check and leftovers can exist nowhere"
             echo "  (no shape concept, no way to read other windows' places);"
-            echo "  anything else on the list is a protocol this compositor"
+            echo "  anything else on the list is a protocol this window manager"
             echo "  does not speak, layer-shell or alpha-modifier usually"
         fi
     fi

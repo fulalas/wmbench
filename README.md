@@ -11,13 +11,13 @@ runs; what it cannot do is reported as not done rather than as a number.
     ./validate.sh           look for visual defects, print a verdict
     ./compare_results.sh    put the saved runs side by side
 
-Both entry points build what they need, work out which compositor is running,
-and save their table under `results/`. On X11 the window manager says so itself
+Both entry points build what they need, work out which window manager is
+running, and save their table in the results folder. On X11 it says so itself
 through the window it owns; on Wayland, where the protocol says nothing about
 who is running, it is the process holding the display socket. Either way the
-answer is the compositor actually running, so replacing one mid-session is
-noticed. A column that cannot be measured reads `-`: power with no sensor,
-desktop CPU with no visible process.
+answer is the one actually running, so replacing it mid-session is noticed. A
+column that cannot be measured reads `-`: power with no sensor, desktop CPU
+with no visible process.
 
 ## The two backends
 
@@ -71,8 +71,9 @@ Some Wayland rows measure a differently-shaped ask:
   composites a small translucent surface travelling over others, which is what
   a drag is, but nothing has to grant a screen position - so the row runs where
   windows cannot be placed at all.
-- **transbench** sets `_NET_WM_WINDOW_OPACITY` blind on X11; on Wayland a
-  compositor without alpha-modifier answers no and the row is "not done".
+- **the stress mix's translucent window** sets `_NET_WM_WINDOW_OPACITY` blind
+  on X11; on Wayland a compositor without alpha-modifier answers no, and the
+  mix is then not the mix, so the `stress` row is "not done".
 - **fullscreen asked** sets `_NET_WM_BYPASS_COMPOSITOR` on X11; Wayland has no
   such property, so it declares the surface opaque instead, which is what makes
   it eligible to go straight to the screen.
@@ -85,8 +86,7 @@ on a single-monitor desktop.
 ## benchmark.sh
 
 Every workload does a **fixed amount of work**, so two sessions compare
-directly and the time it took is a result rather than a setting. The frame rate
-is the exception: flat out, windowed, once, last.
+directly. The frame rate is the exception: flat out, windowed, once, last.
 
 The fullscreen pair - the same frames as they come, then asking compositing to
 step aside - is read in power, not frames, because the saving is the
@@ -97,10 +97,9 @@ No workload repeats another: the scripted person is split into `windows`
 `dnd`.
 
 Every load says where its windows landed, and the moving tests check they
-really moved. A compositor that refuses - cosmic-comp will not reposition an
-X11 window it manages, mutter will not place a Wayland one at all - leaves the
-row empty and named at the end, rather than filled with the small number a
-compositor doing nothing produces.
+really moved. A test the window manager cannot run is flagged "not done", and
+one that tries and fails is flagged "failed" - neither is filled with the small
+number a window manager doing nothing produces.
 
 The CPU column is the desktop's own processes, not the programs being measured.
 On Wayland that is the compositor. On X11 it is the window manager plus the X
@@ -124,14 +123,15 @@ what it got and photographs the window's own content, so a compositor that
 quietly ignores a move is caught. The screen has to be idle, or the tests might
 fail.
 
-Each answers with one of four statuses: **passed**, **failed** (the compositor
-is at fault), **could not run** (no display, no way to photograph the screen)
-and **not available** (the compositor does not do the thing being tested).
+Each answers with one of four statuses: **passed**, **failed** (the window
+manager is at fault), **could not run** (no display, no way to photograph the
+screen) and **not done** (the window manager does not do the thing tested),
+which are the words the benchmark uses for the same things.
 
 Wayland needs a screenshot tool: `grim`, or `gnome-screenshot` or `spectacle`
 together with `ffmpeg` to convert their PNG. Without one the pixel tests are
-skipped. Two "not available" verdicts are Wayland's own rather than any
-compositor's fault: `shape_check`, because there is no shape concept there (the
+skipped. Two "not done" verdicts are Wayland's own rather than any window
+manager's fault: `shape_check`, because there is no shape concept there (the
 defect it hunts lives in per-pixel alpha, argbbench's ground), and
 `leftover_check`, because no protocol tells one window's place from another's.
 The rest run natively on layer-shell compositors.

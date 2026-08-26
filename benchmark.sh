@@ -121,13 +121,14 @@ echo "compositor: $WM_NAME $(wm_version) (compositing $COMPOSITING)"
 [ "$POWER_OK" = 1 ] && echo "power:      $POWER_DESC" \
                      || echo "power:      no sensor, not reported"
 # The moving loads prove their windows really moved with one screenshot before
-# and one after the measurement; without a tool they run on the protocol's
-# word, and say so themselves in their logs
-if [ "$ST" = wayland ]; then
+# and one after the measurement; without a tool they run on the protocol's word
+# Only the loads that carry a window across the screen prove it this way
+UNPROVEN=0
+if [ "$ST" = wayland ] && { want move || want stress; }; then
     if CAP=$(pick_capture_cmd); then
         export BENCH_CAPTURE_CMD=$CAP
     else
-        echo "captures:   no screenshot tool, so the window moves are unproven"
+        UNPROVEN=1
     fi
 fi
 echo
@@ -443,24 +444,30 @@ if want stress; then
     fi
     # A load whose window never moved leaves a scene no other session had, so
     # the row is not a result
-    MIX_OK=$STACK_OK
-    [ "$MIX_REFUSED" = 1 ] && MIX_OK=0
     for l in "${SL[@]}"; do
-        grep -q MOVE-NEVER-HAPPENED "$l" 2>/dev/null && MIX_OK=0
+        grep -q MOVE-NEVER-HAPPENED "$l" 2>/dev/null && MIX_REFUSED=1
     done
-    # A load that died is asked about before the scene is: a mix that lost one
-    # of its own is a failure with a log to read, not a desktop saying no
-    if [ "$OK" != 1 ] || [ -n "$STRESS_THIN" ]; then
-        # The six are given work that has them finish together, so one leaving
-        # early leaves the rest running against a lighter screen than any other
-        # session's
-        [ -n "$STRESS_THIN" ] &&
-            echo "one of the six loads finished early, $STRESS_THIN% of the run" \
-                 "went with less on screen" >> "$STRESS_PRE-thin.log"
+    # The desktop saying no comes first, whatever else it made of the mix: a
+    # load that is refused also leaves early, and read the other way round that
+    # reads as the mix falling apart when it was never allowed to run
+    if [ "$OK" != 1 ]; then
         LOADFAIL="$LOADFAIL stress"
         row_state stress failed
         STRESS=""
-    elif [ "$MIX_OK" = 0 ]; then
+    elif [ "$MIX_REFUSED" = 1 ]; then
+        REFUSED+=("stress"); REFUSED_LOGS+=("stress")
+        row_state stress not_done
+        STRESS=""
+    elif [ -n "$STRESS_THIN" ]; then
+        # The six are given work that has them finish together, so one leaving
+        # early leaves the rest running against a lighter screen than any other
+        # session's
+        echo "one of the six loads finished early, $STRESS_THIN% of the run" \
+             "went with less on screen" >> "$STRESS_PRE-thin.log"
+        LOADFAIL="$LOADFAIL stress"
+        row_state stress failed
+        STRESS=""
+    elif [ "$STACK_OK" = 0 ]; then
         REFUSED+=("stress"); REFUSED_LOGS+=("stress")
         row_state stress not_done
         STRESS=""
@@ -529,19 +536,22 @@ if [ "$POWER_OK" = 1 ] && [ -n "$BAT" ] && [ -n "$IDLE" ] && [ -n "$WINDOWS" ]; 
 fi
 
 # Anything that is not a measurement goes here, so nothing interrupts the table
-if [ -n "$LOADFAIL" ] || [ "${#REFUSED[@]}" != 0 ]; then
+if [ -n "$LOADFAIL" ] || [ "${#REFUSED[@]}" != 0 ] || [ "$UNPROVEN" = 1 ]; then
     echo
     echo "== notes"
     note () { fold -s -w 74 | sed '2,$s/^/  /;s/ *$//'; }
     if [ -n "$LOADFAIL" ]; then
-        printf -- '- failed to run: %s. Log at the end of the report in results/\n' \
+        printf -- '- failed to run: %s. Log at the end of the report in the results folder\n' \
             "$(set -- $LOADFAIL; IFS=,; echo "$*" | sed 's/,/, /g')" |
             note | while IFS= read -r l; do red "$l"; done
     fi
     if [ "${#REFUSED[@]}" != 0 ]; then
-        printf -- '- not done due to limitations of the current window manager: %s. Log at the end of the report in results/\n' \
+        printf -- '- not done due to limitations of the current window manager: %s. Log at the end of the report in the results folder\n' \
             "$( IFS=,; echo "${REFUSED[*]}" | sed 's/,/, /g')" | note
     fi
+    [ "$UNPROVEN" = 1 ] &&
+        printf -- '%s\n' "- the window moves are unproven: no screenshot tool works here" |
+            note
 fi
 
 # compare_results.sh reads these lines and not the table, whose columns move

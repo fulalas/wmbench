@@ -236,7 +236,7 @@ static void expect_state (bw_win *w, unsigned mask, int on, const char *what)
     }
     if (!state_wrong)
     {
-        printf ("STATE-REFUSED the compositor never granted: %s\n", what);
+        printf ("STATE-REFUSED the window manager never granted: %s\n", what);
         fflush (stdout);
     }
     state_wrong = 1;
@@ -987,7 +987,10 @@ static void dnd_phase (int bx, int by)
     if (wa != NULL)
     {
         bw_map (wa);
-        bw_map (wb);
+        if (want_phase ("windows"))
+        {
+            bw_map (wb);
+        }
         bench_move (wb, stage_x + (stage_w - winw) / 2 + 80, stage_y + 40,
                     winw, winh);
         bench_move (wa, bx, home_y, winw, winh);
@@ -1052,7 +1055,20 @@ static void pair_open (int stated)
         bw_destroy (wb);
     }
     pair_stated = stated;
+    /*
+     * The second window is on screen only for the phase that raises two of
+     * them over each other. Every other phase acts on one window, and which of
+     * two overlapping ones is in front is the session's own decision wherever
+     * nothing can be placed or raised - a document scrolling behind the other
+     * window is not the scene. Mapping it as a phase needs it would put the
+     * map, which one session answers with a whole handshake and the other with
+     * a single request, inside the measurement.
+     */
     wb = make_window (base_x + 80, stage_y + 40, "usagebench B", stated);
+    if (!want_phase ("windows"))
+    {
+        bw_unmap (wb);
+    }
     wa = make_window (base_x, base_y, "usagebench A", stated);
     if (bands_buf != NULL)
     {
