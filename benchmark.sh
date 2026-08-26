@@ -18,36 +18,28 @@ tests:
               does, at 60 a second
   argb        2400 redraws of a transparent window that declares an opaque
               region, which is what every GTK window is, at 120 a second
-  windows     the states a window goes through: maximize and back twice, two
-              windows raised over each other, fullscreen and back, and
-              minimize last. Nothing here moves or resizes a window: that is
-              what move and resize are for
+  windows     the states a window goes through: maximize and back, two windows
+              raised over each other, fullscreen and back, and minimize last
   scroll      a text document scrolled by the chevrons, then by dragging the
               thumb the whole way and back
   render      1200 frames of a GL window held to 60 fps
   fullscreen  the same frames in a fullscreen window, twice: as it comes, and
               asking compositing to step aside the way a player does - with
               _NET_WM_BYPASS_COMPOSITOR on X11, and on Wayland by declaring
-              the whole surface opaque. Measured in power, not frames: leaving
-              a window out of compositing saves the compositor's work, not the
-              application's, so the frame rate cannot see it
+              the whole surface opaque
   uncapped    the frame rate flat out, windowed. Runs last
   stress      everything at once: many windows, one moving, one resizing,
-              popups, a translucent window and a GL render. Each does the same
-              amount of work it does in its own test above, and it ends when
-              the last of them has finished it - not on the clock
+              popups, a translucent window and a GL render
 
 Every test does the same fixed amount of work in every session, however long
-that takes, so power and CPU time compare directly; the time it took is
-a result, not a setting. The one exception is uncapped, which is deliberately
-flat out and reports only frames a second.
+that takes, so power and CPU time compare directly. The one exception is
+uncapped, which is deliberately flat out and reports only frames a second.
 
-A test the desktop refuses - a compositor that will not move a window it
-manages, for one - is left empty and named at the end. An empty line says
-nothing; a small number for a window that never moved reads as the best
-result in the table.
+A test the window manager cannot run is flagged "not done", and a test that
+tries and fails is flagged "failed".
 
-The result is printed and saved under results/.
+The results appear as they are measured and are recorded in the results
+subfolder.
 EOF
 }
 case "${1:-}" in -h|--help) usage_help; exit 0;; esac
