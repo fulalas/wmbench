@@ -17,7 +17,7 @@ through the window it owns; on Wayland, where the protocol says nothing about
 who is running, it is the process holding the display socket. Either way the
 answer is the compositor actually running, so replacing one mid-session is
 noticed. A column that cannot be measured reads `-`: power with no sensor,
-compositor CPU with no visible process.
+desktop CPU with no visible process.
 
 ## The two backends
 
@@ -95,11 +95,20 @@ X11 window it manages, mutter will not place a Wayland one at all - leaves the
 row empty and named at the end, rather than filled with the small number a
 compositor doing nothing produces.
 
-The CPU column is the window manager's own process. On X11 part of the
-compositing happens inside the X server and is not counted; the server also
-does every program's drawing, which on Wayland happens inside the programs, so
-counting it would tilt the comparison the other way. Read X11 numbers against
-X11 ones.
+The CPU column is the desktop's own processes, not the programs being measured.
+On Wayland that is the compositor. On X11 it is the window manager plus the X
+server, because the work is split between the two: leaving the server out gives
+X11 its share for free, and on a session without compositing the server does
+nearly all of it. The programs being measured paint their own pixels in their
+own processes on both sessions, so they are in neither figure.
+
+Both parts have to be readable or the column is empty. Results saved before
+this counted the window manager alone, so their CPU column does not compare
+with a new one on X11.
+
+One cost is still X11's alone: an old program that asks the server to draw for
+it adds server work that Wayland does inside the program. Current toolkits draw
+their own pixels, and the `idle` row shows what baseline there is.
 
 ## validate.sh
 

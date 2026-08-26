@@ -120,9 +120,10 @@ else
     COMPOSITING=OFF
 fi
 echo "compositor: $WM_NAME $(wm_version) (compositing $COMPOSITING)"
-[ -z "$WM_PID" ] &&
-    echo "            its process cannot be seen, so the CPU column is" &&
-    echo "            left empty rather than filled with zeros"
+[ -z "$WM_PIDS" ] &&
+    echo "            part of the desktop's processes cannot be seen, so the" &&
+    echo "            CPU column is left empty rather than filled with a" &&
+    echo "            figure that is missing a piece"
 [ "$POWER_OK" = 1 ] && echo "power:      $POWER_DESC" \
                      || echo "power:      no sensor, not reported"
 # The moving loads prove their windows really moved with one screenshot before
@@ -158,9 +159,6 @@ echo "running tests — do not use the computer (~$(( (EST + 59) / 60 )) min)"
 
 now_s () { date +%s.%N; }
 
-# Never add the X server here: it also does every client's drawing, which on
-# Wayland happens inside the clients and is counted nowhere, so counting it
-# would tilt X11 rather than make the two comparable
 comp_cpu () {
     wm_cpu
 }
@@ -298,7 +296,7 @@ tally () {
 }
 
 echo
-printf '%-18s%13s%16s%14s\n' workload power "compositor CPU" "time elapsed"
+printf '%-18s%13s%16s%14s\n' workload power "desktop CPU" "time elapsed"
 
 # print_row and not tally: idle is the baseline and no part of the total
 want idle && running "idle" && IDLE=$(idle_window "$IDLE_WINDOW") && print_row "idle" "$IDLE"
@@ -506,14 +504,6 @@ if [ "$POWER_OK" = 1 ] && [ -n "$BAT" ] && [ -n "$IDLE" ] && [ -n "$WINDOWS" ]; 
                i, u, uwh / 1e6 / i;
         printf " %.1f h\n         on this %.0f Wh battery\n",
                uwh / 1e6 / u, uwh / 1e6}'
-fi
-
-if [ "$TROWS" -gt 0 ] && [ -z "$LOADFAIL" ] && [ "$ST" = x11 ]; then
-    echo
-    echo "On X11 part of the compositing happens inside the X server, whose"
-    echo "CPU time is not counted here: the server also does every program's"
-    echo "drawing, which on Wayland happens inside the programs themselves."
-    echo "Neither column holds all of it, so read X11 against X11."
 fi
 
 if [ "${#REFUSED[@]}" != 0 ]; then

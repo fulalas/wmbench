@@ -307,10 +307,10 @@ amdgpu_device () {
 }
 
 
-# The compositor's CPU time in milliseconds: the window manager plus any
-# helper of its own that draws, which for compiz is the program that paints its
-# window frames. Prints nothing at all when there is no readable process, so a
-# session where this cannot be measured says so instead of reporting zero.
+# The desktop's own CPU time in milliseconds - the window manager, any helper
+# of its own that draws, and on X11 the server. Prints nothing at all when
+# there is no readable process, so a session where this cannot be measured says
+# so instead of reporting zero.
 # Quantised to one clock tick over the run, so at 16 seconds it cannot resolve
 # better than 0.6 ms/s. Read with builtins alone: this sits between reading the
 # counter and starting the clock at every measurement boundary, and an exec
@@ -548,6 +548,36 @@ wayland_socket_owner () {
     return 1
 }
 
+# By name, never by who owns the socket: the X server usually runs as root, and
+# root's /proc/pid/fd cannot be read, while /proc/pid/stat can.
+#
+# More than one server is up more often than not - every Wayland compositor
+# starts an Xwayland of its own - so it has to be the one serving our DISPLAY.
+# Several that could be it are refused rather than guessed between: the wrong
+# one charges a whole desktop's CPU to a session that never spent it.
+x_server_pid () {
+    local n p d args one="" many=0
+    d=${DISPLAY:-}; d=${d#*:}; d=${d%%.*}
+
+    for n in Xorg X Xwayland; do
+        for p in $(pgrep -x "$n"); do
+            [ -r "/proc/$p/stat" ] || continue
+            args=$(tr '\0' '\n' < "/proc/$p/cmdline" 2>/dev/null)
+            if [ -n "$d" ] && grep -qx ":$d" <<< "$args"; then
+                echo "$p"
+
+                return 0
+            fi
+            # One naming a display that is not ours is another session's. One
+            # naming none stays a candidate: startx says nothing and means :0
+            grep -qE '^:[0-9]+$' <<< "$args" && continue
+            one=$p; many=$((many + 1))
+        done
+    done
+    [ "$many" = 1 ] || return 1
+    echo "$one"
+}
+
 # A published window manager name, or a process name, as the short name used
 # here and in the result file names, so no spaces and no capitals.
 wm_canon () {
@@ -569,8 +599,8 @@ wm_canon () {
 }
 
 # The window manager of this session. Sets WM_NAME (mutter, kwin, xfwm4, ...),
-# WM_PID, the process whose CPU time is the compositor's, and WM_PIDS,
-# that process together with any helper of its own that draws.
+# WM_PID, the window manager's own process, and WM_PIDS, everything whose CPU
+# time is the desktop's.
 #
 # The running window manager is asked first, because it is the only source that
 # keeps up when one replaces another mid-session: after compiz --replace the
@@ -646,6 +676,20 @@ detect_wm () {
     esac
     if [ -n "$helpers" ] && [ -n "$WM_PID" ]; then
         WM_PIDS="$WM_PID $(pgrep -x "$helpers" | tr '\n' ' ')"
+    fi
+
+    # The server counts too: a Wayland compositor is one process putting the
+    # screen together, and on X11 that work is split with the server, so leaving
+    # it out hands X11 whatever it did - on a session that does not composite,
+    # nearly the lot. Both or neither, because a figure missing one of them
+    # still reads like the whole desktop's.
+    if [ "$st" = x11 ] || [ "${BENCH_BACKEND:-}" = x11 ]; then
+        pid=$(x_server_pid) || pid=""
+        if [ -n "$pid" ] && [ -n "$WM_PIDS" ]; then
+            WM_PIDS="$WM_PIDS $pid"
+        else
+            WM_PIDS=""
+        fi
     fi
 
     [ -n "$WM_NAME" ]

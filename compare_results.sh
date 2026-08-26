@@ -1,6 +1,6 @@
 #!/bin/bash
 # Put every benchmark result in four boxed tables - frame rate, energy, power
-# and compositor CPU - one column per desktop, the best of each line in bold.
+# and desktop CPU - one column per desktop, the best of each line in bold.
 #
 #   ./compare_results.sh [folder]        default results/
 case "${1:-}" in
@@ -294,7 +294,7 @@ END {
     single("fps", "Frames a second, windowed", 0);
     single("energy", "Energy (J)", 1);
     table(1, "Power (W)");
-    table(2, "Compositor CPU (s)");
+    table(2, "Desktop CPU (s)");
 
     s = "";
     for (i = 1; i <= nkeys; i++)
@@ -310,13 +310,6 @@ END {
     for (i = 1; i <= nkeys; i++)
         if (vmixed[order[i]]) s = s (s == "" ? "" : ", ") order[i];
     if (s != "") printf "* marked *: the runs were not all the same version: %s\n", s;
-
-    for (i = 1; i <= nkeys; i++)
-        if (h3[order[i]] == "x11")
-        {
-            print "* on X11 some of the CPU is used by the X server, which we don'\''t measure";
-            break;
-        }
 
     print "* fullscreen asked tests if the compositor steps aside when asked";
 
