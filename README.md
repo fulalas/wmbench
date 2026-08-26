@@ -17,15 +17,13 @@ process.
 
 ## The two backends
 
-Every binary carries an X11 backend and a native Wayland one and picks at
-startup: with `WAYLAND_DISPLAY` set it speaks Wayland directly, otherwise
-Xlib. `BENCH_BACKEND=x11` on a Wayland session forces the X11 backend, which
-then runs through XWayland - the same load twice is how XWayland's own cost is
-measured. `BENCH_OUTPUT=<name>` picks the monitor on Wayland; the first one
-otherwise.
+Every binary carries both and picks at startup: `WAYLAND_DISPLAY` set means
+native Wayland, otherwise Xlib. `BENCH_BACKEND=x11` forces the X11 backend on a
+Wayland session, so it runs through XWayland - the same load twice is how
+XWayland's own cost is measured. `BENCH_OUTPUT=<name>` picks the monitor.
 
-Wayland denies clients some of what X11 grants, so what runs natively depends
-on the protocols the compositor speaks, probed at startup:
+What runs natively depends on the protocols the compositor speaks, probed at
+startup:
 
 | protocol | gives | spoken by |
 | --- | --- | --- |
@@ -37,111 +35,89 @@ on the protocols the compositor speaks, probed at startup:
 | xdg-decoration | a compositor-drawn frame, as every X11 window gets | most - not mutter |
 | wlr-foreign-toplevel | what a taskbar knows: other windows, unminimise | wlroots compositors - not KWin, not mutter |
 
-Where a protocol is missing the tests that need it fire the same refusal
-channels as always - `PLACE-IGNORED`, `MOVE-REFUSED`, exit 3 - and the row
-reads "not done" or "not available" instead of holding a number for work that
-never happened. On GNOME that is every test built out of placed windows.
+Where a protocol is missing, the usual refusals fire - `PLACE-IGNORED`,
+`MOVE-REFUSED`, exit 3 - and the row reads "not done" instead of a number for
+work that never happened. On GNOME that is every test built out of placed
+windows.
 
-Some Wayland rows measure a differently-shaped ask, said here once:
+Some Wayland rows measure a differently-shaped ask:
 
-- **move** repositions a layer surface by its own margins: the surface really
-  travels and the compositor really composites it, but no window manager is
-  moving a frame. The probe proves the travel with a screenshot before the
-  measurement and once after it, never inside it; without a screenshot tool
-  the row says its moves are unproven.
-- **windows** walks the same states through xdg-shell and verifies them by the
-  compositor's own configure events. Under zone placement the walks are real
-  moves, positions confirmed by the compositor's own events; elsewhere
-  nothing a client says moves a managed toplevel, so the twelve-step walk to
-  each screen edge is carried by the size instead - the same number of
-  composited steps on the way to the same tile. The restore from minimize
-  goes the way a taskbar does it where the compositor lists foreign
-  toplevels, and through an xdg-activation token elsewhere - a compositor
-  that refuses both ends the row with exit 3.
-- **zone placement** answers moves the way the X server does - the compositor
-  reports every position back - so those rows need no screenshot proof. What
-  a zone will not say is where it sits on the screen, deliberately, so the
-  pixel checks never aim a capture through it; they use layer-shell or say
-  "not available".
-- **resize, scroll and dnd** place their two windows themselves, undecorated,
-  on X11 as well as on Wayland. Nothing else gives the two sessions the same
-  scene: a Wayland compositor places a managed window where it likes, and
-  labwc put both in one place, leaving one of them covered whole. The cost is
-  that no manager frames those windows, so a session's own `windows` row is
-  the only one measured with a frame, and results from before this changed do
+- **move** travels a layer surface by its own margins: real compositing, but no
+  frame being moved. A screenshot proves it before and after the measurement,
+  never inside; without a screenshot tool the row says its moves are unproven.
+- **windows** walks the same states through xdg-shell, checked against the
+  compositor's configure events. Zones make the walks real moves; elsewhere
+  nothing a client says moves a managed toplevel, so the twelve steps to each
+  edge are carried by the size instead - the same count of composited steps.
+  Unminimise goes through foreign-toplevel where it exists and an
+  xdg-activation token otherwise; neither, and the row exits 3.
+- **zone placement** reports positions back, so those rows need no screenshot.
+  It deliberately will not say where a window sits on screen, so pixel checks
+  never aim at one.
+- **resize, scroll and dnd** place their own two windows, undecorated, on X11
+  too. Nothing else gives both sessions one scene: a Wayland compositor puts a
+  managed window where it likes, and labwc put both in the same spot, covering
+  one whole. The cost is no frame around them, and results from before this do
   not compare. **windows** keeps its managed pair, because states belong to
-  one, and so it is the one scene the two sessions still do not share.
-- **transbench** is asymmetric by design: X11 sets `_NET_WM_WINDOW_OPACITY`
-  blind and measures whatever the compositor makes of it, while on Wayland a
-  compositor without alpha-modifier is asked, answers no, and the row is "not
-  done" rather than a number for blending that never happened.
-- **fullscreen asked** asks in each session's own way: X11 sets
-  `_NET_WM_BYPASS_COMPOSITOR`, and Wayland, which has no such property,
-  declares the whole surface opaque - what a compositor needs before it will
-  send a fullscreen surface straight to the screen.
+  one, so it is the one scene the two sessions still differ on.
+- **transbench** sets `_NET_WM_WINDOW_OPACITY` blind on X11; on Wayland a
+  compositor without alpha-modifier answers no and the row is "not done".
+- **fullscreen asked** sets `_NET_WM_BYPASS_COMPOSITOR` on X11; Wayland has no
+  such property, so it declares the surface opaque instead, which is what makes
+  it eligible to go straight to the screen.
 
 Fractional scaling breaks the 1:1 map between a window's pixels and a
-screenshot's, so under it every pixel check honestly answers "could not look";
-integer scales are handled. The `BENCH_CAPTURE_CMD` screenshot command must
-write the chosen output alone, which `grim` does on a single-monitor desktop.
+screenshot's, so pixel checks answer "could not look" under it; integer scales
+work. `BENCH_CAPTURE_CMD` must write the chosen output alone, which `grim` does
+on a single-monitor desktop.
 
 ## benchmark.sh
 
 Every workload does a **fixed amount of work**, so two sessions compare
-directly and the time it took is a result rather than a setting.
+directly and the time it took is a result rather than a setting. The frame rate
+is the exception: flat out, windowed, once, last.
 
-The exception is the frame rate, which is deliberately flat out and reports
-only frames a second. It runs once, windowed, and last.
+The fullscreen pair - the same frames as they come, then asking compositing to
+step aside - is read in power, not frames, because the saving is the
+compositor's work and not the application's.
 
-What leaving a window out of compositing is worth is measured separately: the
-same fixed number of frames in a fullscreen window, twice - as it comes, and
-asking compositing to step aside, each session in its own way. That pair
-is read in power, not frames, because the saving is the compositor's work and
-not the application's.
+No workload repeats another: the scripted person is split into `windows`
+(maximize, minimize, snap, raise, fullscreen) and `scroll`, beside `resize` and
+`dnd`.
 
-No workload repeats work another one does: the scripted person is split into
-`windows` (maximize, minimize, snap, raise, fullscreen) and `scroll`, next to
-the `resize` and `dnd` tests.
-
-Every load says where its windows actually landed, and the tests built out of
-moving windows check that the windows really moved. Where a compositor
-refuses - cosmic-comp will not reposition an X11 window it manages, mutter
-will not place a Wayland one anywhere at all - the test is left empty and
-named at the end rather than filled with the small number a compositor doing
-nothing produces.
+Every load says where its windows landed, and the moving tests check they
+really moved. A compositor that refuses - cosmic-comp will not reposition an
+X11 window it manages, mutter will not place a Wayland one at all - leaves the
+row empty and named at the end, rather than filled with the small number a
+compositor doing nothing produces.
 
 The CPU column is the window manager's own process. On X11 part of the
-compositing happens inside the X server and is not in it - but the server also
-does every program's drawing, which on Wayland happens inside the programs
-themselves, so adding it would tilt the comparison the other way rather than
-fix it. Read X11 numbers against X11 ones.
+compositing happens inside the X server and is not counted; the server also
+does every program's drawing, which on Wayland happens inside the programs, so
+counting it would tilt the comparison the other way. Read X11 numbers against
+X11 ones.
 
 ## validate.sh
 
-Nine tests, each hunting one visual defect. `validate.sh` runs them all, then
-logs the geometry it asked for against what it got and photographs the window's
-own content, so a compositor that quietly ignores a move is caught.
+Nine tests, one visual defect each. Each logs the geometry it asked for against
+what it got and photographs the window's own content, so a compositor that
+quietly ignores a move is caught. The screen has to be idle, or the tests might
+fail.
 
-The tests need an idle screen, otherwise they might fail.
+Each answers with one of four statuses: **passed**, **failed** (the compositor
+is at fault), **could not run** (no display, no way to photograph the screen)
+and **not available** (the compositor does not do the thing being tested).
 
-What happens after the framebuffer is beyond every check here: corruption
-produced in the display pipeline, by colour compression for instance, is on the
-panel but in no capture, so a clean verdict does not cover it.
+Wayland needs a screenshot tool: `grim`, or `gnome-screenshot` or `spectacle`
+together with `ffmpeg` to convert their PNG. Without one the pixel tests are
+skipped. Two "not available" verdicts are Wayland's own rather than any
+compositor's fault: `shape_check`, because there is no shape concept there (the
+defect it hunts lives in per-pixel alpha, argbbench's ground), and
+`leftover_check`, because no protocol tells one window's place from another's.
+The rest run natively on layer-shell compositors.
 
-Each test answers with one of four statuses, which is what the report prints:
-**passed**, **failed** (the compositor is at fault), **could not run** (no
-display, no way to photograph the screen) and **not available** (the compositor
-does not do the thing being tested, so nothing was proved either way).
-
-On Wayland a screenshot tool is required: `grim`, or `gnome-screenshot` or
-`spectacle` together with `ffmpeg`, which converts their PNG. Without one the
-pixel tests are skipped. Two "not available" verdicts are inherent to Wayland
-rather than any compositor's fault: `shape_check`, because there is no shape
-concept there (the defect it hunts lives in per-pixel alpha, argbbench's
-ground), and `leftover_check`, because no protocol tells one window's place
-from another's, so nothing can be masked out of the comparison. The rest of
-the checks run natively on layer-shell compositors and answer "not available"
-on the ones without it.
+Corruption produced after the framebuffer, by colour compression for instance,
+is on the panel but in no capture, so a clean verdict does not cover it.
 
 | test | the defect it catches |
 | --- | --- |
@@ -155,15 +131,12 @@ on the ones without it.
 | `iconify_check` | a window not coming back correctly after being minimised |
 | `leftover_check` | garbage left on the desktop by the load, by comparing the idle screen before it with the same screen after (X11 only) |
 
-The stability pass at the end runs everything at once, all of it started and
-finished together, with `motion_check`'s pattern scrolling in the middle of it:
-the same question asked of a compositor that is busy. The windows are opened
-one at a time, each waited for before the next, so they stack in the order they
-were opened and every session composites the same scene. On X11 the waiting and
-the final order are asked of the server; on Wayland each tool prints a
-`WINDOW-UP` marker after its first commit and the scripts wait on that, since
-nothing there can read the order back - the report says so rather than
-claiming an order nobody verified.
+The stability pass runs everything at once, started and finished together, with
+`motion_check`'s pattern scrolling in the middle: the same question asked of a
+busy compositor. Windows open one at a time, each waited for, so they stack in
+open order and every session composites the same scene. X11 asks the server for
+the order; Wayland cannot read it back, so each tool prints `WINDOW-UP` after
+its first commit and the report says the order is unverified.
 
 ## The power metric
 
