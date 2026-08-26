@@ -32,7 +32,7 @@ startup:
 | protocol | gives | spoken by |
 | --- | --- | --- |
 | wlr-layer-shell | putting a window at a screen coordinate | KWin, cosmic-comp, labwc, sway, hyprland - not mutter |
-| xx-zones (experimental) | placing and moving managed toplevels, positions reported back | KWin so far |
+| xx-zones (experimental) | placing and moving managed toplevels, positions reported back | nobody yet - KWin 6.7.4 does not offer it |
 | xdg-activation | raising and focusing own windows | everyone |
 | wp-alpha-modifier | whole-window opacity | KWin, sway, hyprland, labwc - not mutter |
 | xdg-shell | maximize, minimize, fullscreen, popups | everyone |
