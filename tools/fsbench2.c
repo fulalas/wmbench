@@ -13,6 +13,12 @@
  * fullscreen. Without it, whether compositing stops is the window manager's
  * own decision.
  *
+ * Wayland has no such property: a compositor decides by itself whether a
+ * fullscreen surface can go straight to the screen, and it will not while it
+ * has to be told what is behind the surface. So there BENCH_BYPASS declares
+ * the whole surface opaque, which is the thing a player does that makes the
+ * surface eligible; the buffer already matches the output.
+ *
  * A target frame rate holds the application steady, so two renderers can be
  * given exactly the same amount of work.
  */
@@ -140,17 +146,6 @@ int main (int argc, char **argv)
     }
     on_wayland = bw_is_wayland ();
 
-    if (on_wayland && getenv ("BENCH_BYPASS") != NULL)
-    {
-        /* There is nothing to ask: no protocol requests the compositor step
-           aside, it decides by itself. An ordinary window measured under this
-           name would read as an answer to a question nobody could put. */
-        printf ("BYPASS-REFUSED there is no way to ask on wayland\n");
-        fflush (stdout);
-
-        return 3;
-    }
-
     /*
      * A fullscreen test is created already covering the monitor. It matters:
      * a window manager decides whether to leave a window out of compositing
@@ -201,6 +196,12 @@ int main (int argc, char **argv)
         /* The compositor may have answered fullscreen with its own size */
         bw_where (wlwin, NULL, NULL, &ww, &wh);
         bw_frame_size (wlwin, &fw, &fh);
+        /* Declared after the configure, or the region would be the size that
+           was asked for rather than the one the compositor gave */
+        if (getenv ("BENCH_BYPASS") != NULL)
+        {
+            bw_opaque_region (wlwin, 0, 0, ww, wh);
+        }
 
         egl_dpy = eglGetPlatformDisplayEXT (EGL_PLATFORM_WAYLAND_EXT,
                                             bw_native_display (), NULL);

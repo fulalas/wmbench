@@ -1016,18 +1016,30 @@ static void dnd_phase (int bx, int by)
 static bw_win *make_window (int x, int y, const char *name)
 {
     unsigned flags = BW_NOTIFY | BW_KEEP | BW_PLACED;
+    int stated = strcmp (phase, "windows") == 0 || strcmp (phase, "all") == 0;
     bw_win *w;
 
     /*
      * The windows phase walks states that belong to a managed toplevel and to
-     * nothing else, so on Wayland it must never land on a layer surface,
-     * however placeable those are. Every other phase keeps plain placement,
-     * so it runs on the patch of screen the X11 run uses.
+     * nothing else, so there the window stays managed, and on Wayland it must
+     * never land on a layer surface however placeable those are.
+     *
+     * Every other phase needs its own coordinates, and asking a manager for
+     * them is not enough: labwc put both windows in one place and the second
+     * was never seen at all, so those runs composited one window where the
+     * X11 runs composited two. They go unmanaged on both sides instead, which
+     * is the one scene rather than two that look alike.
      */
-    if (bw_is_wayland () &&
-        (strcmp (phase, "windows") == 0 || strcmp (phase, "all") == 0))
+    if (stated)
     {
-        flags |= BW_STATED;
+        if (bw_is_wayland ())
+        {
+            flags |= BW_STATED;
+        }
+    }
+    else
+    {
+        flags |= BW_UNMANAGED;
     }
     w = bw_create (NULL, x, y, winw, winh, name, flags);
     bw_map (w);

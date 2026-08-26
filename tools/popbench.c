@@ -70,7 +70,7 @@ int main (int argc, char **argv)
     }
     int npop = (argc > 3) ? atoi (argv[3]) : 6;
     int i, j, cycles = 0;
-    int bgw, bgh, bgx, bgy, maxx, maxy;
+    int bgw, bgh, bgx, bgy, maxx, maxy, sx, sy, sw, sh;
     long tasks, warm, done = 0;
     double mstart;
 
@@ -88,9 +88,20 @@ int main (int argc, char **argv)
         return 2;
     }
 
-    bgw = BGW; bgh = BGH;
-    bw_stage (80, &bgx, &bgy, &bgw, &bgh);
-    bgw = MIN (BGW, bgw); bgh = MIN (BGH, bgh);
+    bw_stage (80, &sx, &sy, &sw, &sh);
+    bgw = MIN (BGW, sw); bgh = MIN (BGH, sh);
+    /*
+     * Right-aligned, kept short of the stage edge. transbench opens its wider
+     * background above this window, so from the left corner this one was
+     * covered whole; reaching the edge would take the only strip fsbench, the
+     * window under both, has left.
+     */
+    bgx = sx + sw - bgw - 40;
+    if (bgx < sx)
+    {
+        bgx = sx;
+    }
+    bgy = sy;
     /* How far along and down the popups may march before starting again */
     maxx = bgw - 200 - popw;
     if (maxx < 1)

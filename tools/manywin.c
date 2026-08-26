@@ -27,14 +27,26 @@
 
 #define WINW 420
 #define WINH 320
+#define OVER 25                 /* how far each extra bank is offset */
+
+/*
+ * A window covered by its own offset twin shows only its leftmost OVER pixels,
+ * and two windows drawn from the same pattern cannot be told apart there. The
+ * corner carries a colour of its own so a screenshot can name every window.
+ */
+static unsigned long tag_colour (int i)
+{
+    return ((unsigned long) (40 + (i % 5) * 50) << 16) |
+           ((unsigned long) (40 + ((i / 5) % 5) * 50) << 8) |
+           (unsigned long) (40 + ((i / 25) % 5) * 50);
+}
 
 int main (int argc, char **argv)
 {
-    bw_win **wins;
-    bw_win *pat[6];
+    bw_win **wins, **pat;
     int count = (argc > 1) ? atoi (argv[1]) : 20;
     double seconds = (argc > 2) ? atof (argv[2]) : 0.0;
-    int i, j, cols, sw, sh, sx, sy;
+    int i, j, cols, sw, sh, sx, sy, lastx = 0, lasty = 0;
     unsigned long colours[6] = {
         0x904040, 0x409040, 0x404090, 0x909040, 0x904090, 0x409090
     };
@@ -59,7 +71,8 @@ int main (int argc, char **argv)
         return 2;
     }
     wins = calloc (count, sizeof (bw_win *));
-    if (wins == NULL)
+    pat = calloc (count, sizeof (bw_win *));
+    if (wins == NULL || pat == NULL)
     {
         fprintf (stderr, "out of memory\n");
 
@@ -72,10 +85,11 @@ int main (int argc, char **argv)
      * are scenery other benchmarks move over - stress_start() walks two
      * windows across them - so a strip that is uncovered gets filled from the
      * background: painted once it would come back black and stay black,
-     * wherever nothing composites and keeps the contents for us. The pattern
-     * only depends on i % 6, so six of them cover any number of windows.
+     * wherever nothing composites and keeps the contents for us. One pattern
+     * per window, not one per colour: windows sharing a pattern cannot be told
+     * from each other in a screenshot.
      */
-    for (i = 0; i < 6; i++)
+    for (i = 0; i < count; i++)
     {
         pat[i] = bw_canvas (WINW, WINH);
         if (pat[i] == NULL)
@@ -87,9 +101,11 @@ int main (int argc, char **argv)
         bw_fill (pat[i], 0x000000, 0, 0, WINW, WINH);
         for (j = 0; j < 24; j++)
         {
-            bw_fill (pat[i], colours[(i + j) % 6], (j * 31) % (WINW - 70),
-                     (j * 43) % (WINH - 50), 70, 50);
+            bw_fill (pat[i], colours[(i + j) % 6],
+                     (j * 31 + i * 57) % (WINW - 70),
+                     (j * 43 + i * 89) % (WINH - 50), 70, 50);
         }
+        bw_fill (pat[i], tag_colour (i), 0, 0, OVER, OVER);
     }
 
     for (i = 0; i < count; i++)
@@ -104,7 +120,7 @@ int main (int argc, char **argv)
         }
         x = sx + (i % cols) * (WINW + 40);
         y = sy + ((i / cols) % rows) * (WINH + 60);
-        x += 25 * (i / (cols * rows));
+        x += OVER * (i / (cols * rows));
 
         wins[i] = bw_create (NULL, x, y, WINW, WINH, "manywin",
                              BW_PLACED | BW_UNMANAGED);
@@ -114,12 +130,20 @@ int main (int argc, char **argv)
 
             return 2;
         }
-        bw_set_background (wins[i], pat[i % 6]);
+        bw_set_background (wins[i], pat[i]);
         bw_map (wins[i]);
+        lastx = x;
+        lasty = y;
     }
     bw_sync ();
     sleep (3);
-    bench_placed (wins[0], sx, sy, "manywin");
+    /*
+     * The last window opened, not the first: a window an offset bank covers
+     * shows mostly its neighbour's pixels, and the proof read that as a window
+     * placed somewhere else. It only passed while every bank was drawn from
+     * the same six patterns, which made the neighbour's pixels a match.
+     */
+    bench_placed (wins[count - 1], lastx, lasty, "manywin");
 
     printf ("READY %d windows\n", count);
     fflush (stdout);

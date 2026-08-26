@@ -24,8 +24,9 @@ tests:
             the thumb the whole way and back
   render    1200 frames of a GL window held to 60 fps
   fullscreen  the same frames in a fullscreen window, twice: as it comes, and
-            asking compositing to step aside with _NET_WM_BYPASS_COMPOSITOR
-            the way a player does. Measured in power, not frames: leaving a
+            asking compositing to step aside the way a player does - with
+            _NET_WM_BYPASS_COMPOSITOR on X11, and on Wayland by declaring the
+            whole surface opaque. Measured in power, not frames: leaving a
             window out of compositing saves the compositor's work, not the
             application's, so the frame rate cannot see it
   uncapped  the frame rate flat out, windowed. Runs last
@@ -131,8 +132,7 @@ if [ "$ST" = wayland ]; then
     if CAP=$(pick_capture_cmd); then
         export BENCH_CAPTURE_CMD=$CAP
     else
-        echo "captures:   no screenshot tool (grim), so the moves the loads"
-        echo "            report are taken on the protocol's word, unproven"
+        echo "captures:   no screenshot tool, so the window moves are unproven"
     fi
 fi
 echo

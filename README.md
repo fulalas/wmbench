@@ -67,8 +67,10 @@ Some Wayland rows measure a differently-shaped ask, said here once:
   blind and measures whatever the compositor makes of it, while on Wayland a
   compositor without alpha-modifier is asked, answers no, and the row is "not
   done" rather than a number for blending that never happened.
-- **fullscreen asked** exists only on X11: nothing on Wayland asks a
-  compositor to step aside, so the row answers "not done" there.
+- **fullscreen asked** asks in each session's own way: X11 sets
+  `_NET_WM_BYPASS_COMPOSITOR`, and Wayland, which has no such property,
+  declares the whole surface opaque - what a compositor needs before it will
+  send a fullscreen surface straight to the screen.
 
 Fractional scaling breaks the 1:1 map between a window's pixels and a
 screenshot's, so under it every pixel check honestly answers "could not look";
@@ -85,7 +87,7 @@ only frames a second. It runs once, windowed, and last.
 
 What leaving a window out of compositing is worth is measured separately: the
 same fixed number of frames in a fullscreen window, twice - as it comes, and
-asking compositing to step aside with `_NET_WM_BYPASS_COMPOSITOR`. That pair
+asking compositing to step aside, each session in its own way. That pair
 is read in power, not frames, because the saving is the compositor's work and
 not the application's.
 
