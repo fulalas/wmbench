@@ -517,7 +517,7 @@ x11_wm_check () {
 # the socket. Where both answer they agree; where the lock is all there is, the
 # compositor is the oldest of them, having made it before starting anything.
 wayland_socket_owner () {
-    local sock ino p pid
+    local sock ino p c pid name cname
     local -a targets
     [ -n "${WAYLAND_DISPLAY:-}" ] || return 1
     sock=$WAYLAND_DISPLAY
@@ -540,7 +540,22 @@ wayland_socket_owner () {
               awk -F/ '{print $3}' | sort -n | head -1)
         [ -n "$pid" ] || continue
         [ -r "/proc/$pid/comm" ] || continue
-        printf '%s\n%s\n' "$pid" "$(< "/proc/$pid/comm")"
+        read -r name < "/proc/$pid/comm"
+        # Plasma makes the socket in kwin_wayland_wrapper and hands the fd to
+        # kwin_wayland, so the owner is a name that reads right sitting next to
+        # the compositor doing all the work, and the CPU column comes out 0.00.
+        # A wrapper is its compositor's name with something on the end, so only
+        # a child whose name starts the owner's is taken for one: every
+        # compositor has other children, and gnome-shell-cal would pass a test
+        # on the name meaning the same thing
+        for c in $(pgrep -P "$pid" 2>/dev/null); do
+            [ -r "/proc/$c/comm" ] || continue
+            read -r cname < "/proc/$c/comm"
+            case "$name" in
+                "$cname"?*) pid=$c; name=$cname; break;;
+            esac
+        done
+        printf '%s\n%s\n' "$pid" "$name"
 
         return 0
     done

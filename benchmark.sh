@@ -382,7 +382,7 @@ if want stress; then
         done
     done
     T0=$(now_s); C0=$(comp_cpu); power_begin
-    OK=1; LEFT=${#SL[@]}
+    OK=1; MIX_REFUSED=0; LEFT=${#SL[@]}
     SDL=$((SECONDS + BENCH_RUN_TIMEOUT))
     while [ "$LEFT" -gt 0 ]; do
         power_sample
@@ -404,7 +404,11 @@ if want stress; then
             if grep -q MEASURE-END "${SL[$i]}" 2>/dev/null; then
                 SEND[$i]=$(now_s)
             elif ! kill -0 "${SP[$i]}" 2>/dev/null; then
-                SEND[$i]=$(now_s); OK=0
+                # Why it left, not just that it did: 3 is the desktop refusing
+                # the work, which is a row not done, the same as on its own
+                wait "${SP[$i]}" 2>/dev/null; rc=$?
+                SEND[$i]=$(now_s)
+                [ "$rc" = 3 ] && MIX_REFUSED=1 || OK=0
             else
                 LEFT=$((LEFT + 1))
             fi
@@ -434,6 +438,7 @@ if want stress; then
     # A load whose window never moved leaves a scene no other session had, so
     # the row is not a result
     MIX_OK=$STACK_OK
+    [ "$MIX_REFUSED" = 1 ] && MIX_OK=0
     for l in "${SL[@]}"; do
         grep -q MOVE-NEVER-HAPPENED "$l" 2>/dev/null && MIX_OK=0
     done
