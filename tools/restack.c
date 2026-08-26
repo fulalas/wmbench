@@ -270,7 +270,9 @@ static int stack_wrong (int argc, char **argv, int first, int say)
     XSync (d, False);
     if (!XQueryTree (d, root, &r, &parent, &kids, &n))
     {
-        return 0;
+        /* An unread tree is no verdict: 0 here printed "as asked" for a
+           check that never ran */
+        return -1;
     }
     for (k = 0; k < n; k++)
     {
@@ -446,7 +448,14 @@ int main (int argc, char **argv)
     {
         int bad = stack_wrong (argc, argv, first, 1);
 
-        printf ("stack: %s\n", bad ? "NOT AS ASKED" : "as asked");
+        if (bad < 0)
+        {
+            printf ("stack: cannot be verified, the window tree could not be read\n");
+        }
+        else
+        {
+            printf ("stack: %s\n", bad ? "NOT AS ASKED" : "as asked");
+        }
         fflush (stdout);
         XCloseDisplay (d);
 

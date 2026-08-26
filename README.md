@@ -156,7 +156,7 @@ The stability pass runs everything at once, started and finished together, with
 busy compositor. Windows open one at a time, each waited for, so they stack in
 open order and every session composites the same scene. X11 asks the server for
 the order; Wayland cannot read it back, so each tool prints `WINDOW-UP` after
-its first commit and the report says the order is unverified.
+its first commit and the order goes unverified.
 
 ## The power metric
 

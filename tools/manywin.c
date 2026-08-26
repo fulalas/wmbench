@@ -26,9 +26,9 @@
  */
 static unsigned long tag_colour (int i)
 {
-    return ((unsigned long) (40 + (i % 5) * 50) << 16) |
-           ((unsigned long) (40 + ((i / 5) % 5) * 50) << 8) |
-           (unsigned long) (40 + ((i / 25) % 5) * 50);
+    return ((unsigned long) (40 + (i % 8) * 28) << 16) |
+           ((unsigned long) (40 + ((i / 8) % 8) * 28) << 8) |
+           (unsigned long) (40 + ((i / 64) % 8) * 28);
 }
 
 int main (int argc, char **argv)
@@ -151,7 +151,12 @@ int main (int argc, char **argv)
     }
     else if (seconds > 0.0)
     {
-        usleep ((useconds_t) (seconds * 1e6));
+        double end = bench_now () + seconds;
+
+        while (bench_now () < end)
+        {
+            usleep (200000);
+        }
     }
     else
     {

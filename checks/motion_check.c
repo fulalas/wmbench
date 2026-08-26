@@ -102,6 +102,10 @@ int main (int argc, char **argv)
     }
     if (!bench_aimable (win))
     {
+        printf ("the screen cannot be photographed here, nothing proved\n");
+        bw_destroy (win);
+        bw_close ();
+
         return 3;
     }
     bw_map (win);

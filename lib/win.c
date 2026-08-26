@@ -25,6 +25,11 @@ int bw_open (void)
     }
     else
     {
+        if (want != NULL && want[0] != '\0')
+        {
+            fprintf (stderr, "unknown BENCH_BACKEND '%s', auto-detecting\n",
+                     want);
+        }
         ops = (wl != NULL && wl[0] != '\0') ? &bw_wl_ops : &bw_x11_ops;
     }
     if (!ops->open ())

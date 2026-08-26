@@ -61,6 +61,13 @@ int main (int argc, char **argv)
     int rounds = (argc > 1) ? atoi (argv[1]) : 3;
     int r, x, y, ok = 0, bad = 0, blind = 0;
 
+    /* Zero rounds proves nothing and must not be reported as a failure */
+    if (rounds < 1)
+    {
+        fprintf (stderr, "rounds must be at least 1\n");
+
+        return 2;
+    }
     if (!bw_open ())
     {
         fprintf (stderr, "no display\n");
@@ -77,6 +84,10 @@ int main (int argc, char **argv)
     }
     if (!bench_aimable (win))
     {
+        printf ("the screen cannot be photographed here, nothing proved\n");
+        bw_destroy (win);
+        bw_close ();
+
         return 3;
     }
     bw_map (win);
@@ -108,6 +119,8 @@ int main (int argc, char **argv)
         if (img == NULL)
         {
             fprintf (stderr, "capture failed\n");
+            bw_destroy (win);
+            bw_close ();
 
             return 2;
         }

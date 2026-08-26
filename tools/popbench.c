@@ -63,12 +63,15 @@ int main (int argc, char **argv)
     }
     int npop = (argc > 3) ? atoi (argv[3]) : 6;
     int i, j, cycles = 0;
-    int bgw, bgh, bgx, bgy, maxx, maxy, sx, sy, sh, fx, fy, fw, fh;
+    int bgw, bgh, bgx, bgy, maxx, maxy, fillx, filly;
+    int sx, sy, sh, fx, fy, fw, fh;
     long tasks, warm, done = 0;
     double mstart;
 
     if (argc > 4) popw = atoi (argv[4]);
     if (argc > 5) poph = atoi (argv[5]);
+    if (popw < 40) popw = 40;
+    if (poph < 40) poph = 40;
     double start;
     unsigned long colours[6] = {
         0xc04040, 0x40c040, 0x4040c0, 0xc0c040, 0xc040c0, 0x40c0c0
@@ -132,9 +135,19 @@ int main (int argc, char **argv)
     bench_placed (bg, bgx, bgy, "popbench background");
     bw_where (bg, &bgx, &bgy, NULL, NULL);
 
+    fillx = bgw - 80;
+    if (fillx < 1)
+    {
+        fillx = 1;
+    }
+    filly = bgh - 60;
+    if (filly < 1)
+    {
+        filly = 1;
+    }
     for (i = 0; i < 300; i++)
     {
-        bw_fill (bg, colours[i % 6], (i * 41) % (bgw - 80), (i * 67) % (bgh - 60),
+        bw_fill (bg, colours[i % 6], (i * 41) % fillx, (i * 67) % filly,
                  80, 60);
     }
     bw_present (bg);
@@ -163,6 +176,12 @@ int main (int argc, char **argv)
         if (pop[i] == NULL)
         {
             fprintf (stderr, "no popup window\n");
+            while (i-- > 0)
+            {
+                bw_destroy (pop[i]);
+            }
+            bw_destroy (bg);
+            free (pop);
 
             return 2;
         }

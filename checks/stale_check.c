@@ -97,6 +97,13 @@ int main (int argc, char **argv)
     int r, i, ox, oy, bad = 0;
     int settled_ok = 0, settled_bad = 0, stale_ok = 0, stale_bad = 0;
 
+    /* Zero rounds proves nothing and must not be reported as a failure */
+    if (rounds < 1)
+    {
+        fprintf (stderr, "rounds must be at least 1\n");
+
+        return 2;
+    }
     if (!bw_open ())
     {
         fprintf (stderr, "no display\n");
@@ -121,11 +128,19 @@ int main (int argc, char **argv)
     if (w1 == NULL || w2 == NULL)
     {
         fprintf (stderr, "no window\n");
+        bw_destroy (w1);
+        bw_destroy (w2);
+        bw_close ();
 
         return 2;
     }
     if (!bench_aimable (w1))
     {
+        printf ("the screen cannot be photographed here, nothing proved\n");
+        bw_destroy (w1);
+        bw_destroy (w2);
+        bw_close ();
+
         return 3;
     }
 
@@ -149,6 +164,9 @@ int main (int argc, char **argv)
             oy < y2 + WINH && y2 < oy + WINH)
         {
             printf ("the two windows overlap, the check would be meaningless\n");
+            bw_destroy (w1);
+            bw_destroy (w2);
+            bw_close ();
 
             return 2;
         }
@@ -182,6 +200,9 @@ int main (int argc, char **argv)
             if (img == NULL)
             {
                 fprintf (stderr, "capture failed\n");
+                bw_destroy (w1);
+                bw_destroy (w2);
+                bw_close ();
 
                 return 2;
             }
@@ -224,6 +245,9 @@ int main (int argc, char **argv)
         if (img == NULL)
         {
             fprintf (stderr, "capture failed\n");
+            bw_destroy (w1);
+            bw_destroy (w2);
+            bw_close ();
 
             return 2;
         }

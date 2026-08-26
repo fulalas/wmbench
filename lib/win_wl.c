@@ -453,8 +453,12 @@ static int dispatch_for (int ms)
         wl_display_cancel_read (dpy);
         if (got < 0 && errno == EINTR)
         {
-            left -= (int) ((b.tv_sec - a.tv_sec) * 1000 +
-                           (b.tv_nsec - a.tv_nsec) / 1000000);
+            int spent = (int) ((b.tv_sec - a.tv_sec) * 1000 +
+                               (b.tv_nsec - a.tv_nsec) / 1000000);
+
+            /* Sub-millisecond interruptions round down to no time spent, and
+               a stream of them would make this timeout eternal */
+            left -= (spent > 0) ? spent : 1;
             continue;
         }
 
@@ -604,6 +608,9 @@ static int wl_open (void)
     }
     if (out->lw <= 0 || out->lh <= 0)
     {
+        wl_display_disconnect (dpy);
+        dpy = NULL;
+
         return 0;
     }
 
@@ -919,6 +926,18 @@ static void raster_ensure (bw_win *win)
     else if (!(win->flags & BW_KEEP))
     {
         ow = oh = 0;
+    }
+    else if (stride != ww->buf.stride)
+    {
+        int row, keep = (oh < bh) ? oh : bh;
+
+        /* Backwards, or the widened rows overwrite the ones still to move */
+        for (row = keep - 1; row > 0; row--)
+        {
+            memmove (ww->raster + (size_t) row * stride,
+                     ww->raster + (size_t) row * ww->buf.stride,
+                     (size_t) (ow < bw ? ow : bw) * 4);
+        }
     }
     draw_init (&ww->buf, ww->raster, bw, bh, stride,
                (win->flags & BW_ARGB) != 0);
@@ -1359,7 +1378,7 @@ static void apply_surface_extras (bw_win *win)
      * the compositor reads a device-sized buffer as that many logical pixels
      * and the window comes out the wrong size on a HiDPI output.
      */
-    if (out->scale != 1 && !ww->frame_mode)
+    if (out->scale != 1)
     {
         wl_surface_set_buffer_scale (ww->surf, out->scale);
     }
@@ -1514,6 +1533,15 @@ static void wl_map (bw_win *win)
         {
             break;
         }
+    }
+    if (!ww->configured)
+    {
+        /* A buffer on a never-configured surface is a protocol error that
+           ends the connection for every window, not just this one */
+        role_teardown (win);
+        wl_display_flush (dpy);
+
+        return;
     }
     ww->mapped = 1;
     if (!ww->gl && !ww->frame_mode)

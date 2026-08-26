@@ -38,12 +38,13 @@ if [ -z "${BENCH_RECORD_CMD:-}" ]; then
     command -v gpu-screen-recorder >/dev/null ||
         { echo "gpu-screen-recorder not found; set BENCH_RECORD_CMD"; exit 1; }
     GETCAP=$(command -v getcap || ls /sbin/getcap /usr/sbin/getcap 2>/dev/null | head -1)
+    GSR_KMS=$(command -v gsr-kms-server || echo /usr/bin/gsr-kms-server)
     if [ -n "$GETCAP" ] &&
-       ! "$GETCAP" /usr/bin/gsr-kms-server 2>/dev/null | grep -q cap_sys_admin; then
+       ! "$GETCAP" "$GSR_KMS" 2>/dev/null | grep -q cap_sys_admin; then
         echo "gsr-kms-server has no cap_sys_admin, so every recording would"
         echo "ask for authentication. Give it once, then run this again:"
         echo
-        echo "  sudo setcap cap_sys_admin+ep /usr/bin/gsr-kms-server"
+        echo "  sudo setcap cap_sys_admin+ep $GSR_KMS"
         exit 1
     fi
 fi
@@ -66,7 +67,13 @@ rec_start () {                  # $1 output file
     # $! is set even for a command that died on the spot, and from then on
     # every test would be reported as recorded with no video behind it
     kill -0 "$REC_PID" 2>/dev/null ||
-        { echo "the recorder did not start, see $DIR/recorder.log"; exit 1; }
+        { echo "the recorder did not start, see $DIR/recorder.log"
+          # The stress loads wait at a gate this exit would never open, so
+          # left alone they would wait for ever
+          [ -n "${STRESS_PIDS+x}" ] && kill "${STRESS_PIDS[@]}" 2>/dev/null
+          [ -n "${STRESS_SCENERY_PID:-}" ] &&
+              kill "$STRESS_SCENERY_PID" 2>/dev/null
+          exit 1; }
 }
 rec_stop () {                   # SIGINT is how the recorder finalizes the file
     kill -INT "$REC_PID" 2>/dev/null

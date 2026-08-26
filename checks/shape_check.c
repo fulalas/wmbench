@@ -63,6 +63,13 @@ int main (int argc, char **argv)
     int scr, ev, err, rounds = (argc > 1) ? atoi (argv[1]) : 2;
     int r, y, bx, by, fx, fy, ok = 0, bad = 0;
 
+    /* Zero rounds proves nothing and must not be reported as a failure */
+    if (rounds < 1)
+    {
+        fprintf (stderr, "rounds must be at least 1\n");
+
+        return 2;
+    }
     if (!bw_open ())
     {
         fprintf (stderr, "no display\n");

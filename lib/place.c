@@ -110,14 +110,24 @@ static int wl_verified = 1;
 
 void bench_watch (bw_win *w)
 {
-    int x, y, i;
+    int x, y, i, empty = WATCHED;
 
+    /* The window's own slot first: an empty slot earlier in the table would
+       otherwise start a second box and split the spread across the two */
     for (i = 0; i < WATCHED; i++)
     {
-        if (seen[i].n == 0 || seen[i].w == w)
+        if (seen[i].n > 0 && seen[i].w == w)
         {
             break;
         }
+        if (seen[i].n == 0 && empty == WATCHED)
+        {
+            empty = i;
+        }
+    }
+    if (i == WATCHED)
+    {
+        i = empty;
     }
     if (i == WATCHED)
     {

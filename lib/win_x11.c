@@ -622,8 +622,12 @@ static void x11_where (bw_win *win, int *x, int *y, int *width, int *height)
 
 static void x11_resize (bw_win *win, int width, int height)
 {
-    XResizeWindow (d, ((x11_win *) win->impl)->xid,
-                   (unsigned) width, (unsigned) height);
+    /* The same guard as x11_move_raw: zero or negative would end the run */
+    if (width > 0 && height > 0)
+    {
+        XResizeWindow (d, ((x11_win *) win->impl)->xid,
+                       (unsigned) width, (unsigned) height);
+    }
 }
 
 /* Maximise, minimise, fullscreen: the window manager's own states */
@@ -796,7 +800,9 @@ static void x11_poly (bw_win *win, unsigned long c, const bw_point *p, int n)
 
     if (n > 16)
     {
-        n = 16;
+        /* Refused whole, as wl_poly does: a clamped polygon here would put
+           different content on the two backends for the same call */
+        return;
     }
     for (i = 0; i < n; i++)
     {

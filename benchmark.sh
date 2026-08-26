@@ -177,6 +177,18 @@ idle_window () {
         'BEGIN{printf "%s %s %.1f", w, c, t}'
 }
 
+# TERM alone is not enough: a load that ignores it would leave the wait below
+# hanging for ever, so KILL follows after a grace period
+term_hard () {
+    local _
+    kill "$1" 2>/dev/null
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        kill -0 "$1" 2>/dev/null || return 0
+        sleep 0.5
+    done
+    kill -9 "$1" 2>/dev/null
+}
+
 measure () {
     local name=$1 tasks=$2 log pid t0 t1 c0 c1 w deadline
     shift 2
@@ -198,7 +210,7 @@ measure () {
             # be read back as the marker itself
             echo "killed after ${BENCH_START_TIMEOUT}s: never began measuring" \
                 >> "$log"
-            kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+            term_hard "$pid"; wait "$pid" 2>/dev/null
 
             return 1
         fi
@@ -211,7 +223,7 @@ measure () {
         if [ "$SECONDS" -ge "$deadline" ]; then
             echo "killed after ${BENCH_RUN_TIMEOUT}s: never finished its work" \
                 >> "$log"
-            kill "$pid" 2>/dev/null
+            term_hard "$pid"
             break
         fi
         power_sample
@@ -245,9 +257,8 @@ run_row () {
     esac
 }
 
-IDLE=""; WINDOWS=""; SCROLL=""; MOVE=""; RESIZE=""; DND=""; POP=""; RENDER=""; UNCAP=""
-VIDEO=""; ARGB=""
-FPS=""; FS=""; FS_ASK=""; STRESS=""; LOADFAIL=""
+IDLE=""; WINDOWS=""
+FPS=""; STRESS=""; LOADFAIL=""
 
 # The braces matter: a bare exec applies every redirection to the shell itself,
 # so the silence meant for a failed open would swallow this run's own errors,
@@ -311,27 +322,21 @@ want idle && running "idle" && IDLE=$(idle_window "$IDLE_WINDOW") && print_row "
 
 if want move; then
     run_row "move" move "$MOVE_STEPS" ./tools/movebench 0 move 120
-    MOVE=$ROW_OUT
 fi
 if want resize; then
     run_row "resize" resize "$RESIZE_CYCLES" ./tools/usagebench 0 3 resize
-    RESIZE=$ROW_OUT
 fi
 if want dnd; then
     run_row "drag and drop" dnd "$DND_PASSES" ./tools/usagebench 0 3 dnd
-    DND=$ROW_OUT
 fi
 if want popups; then
     run_row "popups" popups "$POP_CYCLES" ./tools/popbench 0 20 6
-    POP=$ROW_OUT
 fi
 if want video; then
     run_row "video" video "$VIDEO_FRAMES" ./tools/videobench 0 60
-    VIDEO=$ROW_OUT
 fi
 if want argb; then
     run_row "transparent window" argb "$ARGB_STEPS" ./tools/argbbench 0 120
-    ARGB=$ROW_OUT
 fi
 if want windows; then
     run_row "windows" windows "$WINDOWS_PASSES" ./tools/usagebench 0 3 windows
@@ -339,11 +344,9 @@ if want windows; then
 fi
 if want scroll; then
     run_row "scroll" scroll "$SCROLL_PASSES" ./tools/usagebench 0 3 scroll
-    SCROLL=$ROW_OUT
 fi
 if want render; then
     run_row "render 60 fps" render "$RENDER_FRAMES" ./tools/fsbench2 0 windowed 60
-    RENDER=$ROW_OUT
 fi
 
 # BENCH_LIGHT on purpose: with the heavy shader the application costs some
@@ -352,10 +355,8 @@ fi
 if want fullscreen; then
     run_row "fullscreen" fullscreen "$RENDER_FRAMES" \
         env BENCH_LIGHT=1 ./tools/fsbench2 0 fullscreen 60
-    FS=$ROW_OUT
     run_row "fullscreen asked" fullscreen-asked "$RENDER_FRAMES" \
         env BENCH_LIGHT=1 BENCH_BYPASS=1 ./tools/fsbench2 0 fullscreen 60
-    FS_ASK=$ROW_OUT
 fi
 
 # Second to last on purpose: everything at once heats the chip and would warm
@@ -366,7 +367,7 @@ if want stress; then
     # The mix lives in lib/common.sh so validate.sh measures the same load
     stress_start "$GO" bm-s
     MANY=$STRESS_SCENERY_PID
-    SL=("${STRESS_LOGS[@]}"); SP=("${STRESS_PIDS[@]}"); SEND=()
+    SL=("${STRESS_LOGS[@]}"); SP=("${STRESS_PIDS[@]}"); SEND=(); STERM=()
     stress_wait_ready
 
     STACK_OK=1
@@ -401,9 +402,16 @@ if want stress; then
         if [ "$SECONDS" -ge "$SDL" ]; then
             for i in "${!SP[@]}"; do
                 kill -0 "${SP[$i]}" 2>/dev/null || continue
-                echo "killed after ${BENCH_RUN_TIMEOUT}s: never finished its work" \
-                    >> "${SL[$i]}"
-                kill "${SP[$i]}" 2>/dev/null
+                # Once each: this block reruns every tenth of a second, and a
+                # load that ignores TERM would otherwise keep LEFT up for ever
+                if [ -z "${STERM[$i]:-}" ]; then
+                    STERM[$i]=$SECONDS
+                    echo "killed after ${BENCH_RUN_TIMEOUT}s: never finished its work" \
+                        >> "${SL[$i]}"
+                    kill "${SP[$i]}" 2>/dev/null
+                elif [ "$SECONDS" -ge $((STERM[$i] + 5)) ]; then
+                    kill -9 "${SP[$i]}" 2>/dev/null
+                fi
             done
         fi
         LEFT=0

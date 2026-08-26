@@ -1,5 +1,5 @@
 /*
- *   fsbench <seconds> [windowed] [target fps]
+ *   fsbench2 <seconds> [windowed] [target fps] [width] [height]
  *
  * An ordinary window, so it is the kind of application a compositor keeps
  * compositing for. A target frame rate holds it steady, so two sessions are
@@ -350,7 +350,12 @@ int main (int argc, char **argv)
         }
 
         glx_ctx = glXCreateContext (xd, vi, NULL, True);
-        glXMakeCurrent (xd, xwin, glx_ctx);
+        if (glx_ctx == NULL || !glXMakeCurrent (xd, xwin, glx_ctx))
+        {
+            fprintf (stderr, "no GL context\n");
+
+            return 1;
+        }
         /* Not everywhere; without the guard epoxy aborts where it is missing */
         if (epoxy_has_glx_extension (xd, scr, "GLX_EXT_swap_control"))
         {

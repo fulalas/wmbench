@@ -15,7 +15,6 @@ case "${1:-}" in
 esac
 set -u
 QUICK=${QUICK:-0}
-BENCH_POWER_OPTIONAL=1
 source "$(dirname "$0")/lib/common.sh"
 cd "$(dirname "$0")" || exit 1
 

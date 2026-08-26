@@ -716,7 +716,7 @@ static void dnd_phase (int bx, int by)
     const int home_y = by;      /* by is reused below as the host's own origin */
     int home[NICON], album[NICON];
     int order[4] = { 0, 3, 5, 6 };
-    int k, f, i, cx, cy, tx, ty, x, y, nalbum = 0;
+    int k, f, i, cx, cy, tx, ty, x, y, nalbum = 0, no_carrier = 0;
     int wide = winw, tall = winh;
     int lx, rx, hostw, hosth, hostx, hx0 = 0, hy0 = 0;
     char ckname[32];
@@ -812,10 +812,10 @@ static void dnd_phase (int bx, int by)
     {
         if (carrier[i] == NULL)
         {
-            va = NULL;          /* one missing is no drag to composite */
+            no_carrier = 1;     /* one missing is no drag to composite */
         }
     }
-    if (va == NULL || vb == NULL)
+    if (no_carrier || va == NULL || vb == NULL)
     {
         scene_wrong = 1;
         dnd_done (host, va, vb, wide, tall);

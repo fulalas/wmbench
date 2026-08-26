@@ -54,6 +54,13 @@ int main (int argc, char **argv)
     int rounds = (argc > 1) ? atoi (argv[1]) : 3;
     int r, i, j, x, y, ox, oy, capw, caph, gw, gh, ok = 0, bad = 0;
 
+    /* Zero rounds proves nothing and must not be reported as a failure */
+    if (rounds < 1)
+    {
+        fprintf (stderr, "rounds must be at least 1\n");
+
+        return 2;
+    }
     if (!bw_open ())
     {
         fprintf (stderr, "no display\n");
@@ -71,6 +78,10 @@ int main (int argc, char **argv)
     }
     if (!bench_aimable (win))
     {
+        printf ("the screen cannot be photographed here, nothing proved\n");
+        bw_destroy (win);
+        bw_close ();
+
         return 3;
     }
 
@@ -88,6 +99,8 @@ int main (int argc, char **argv)
     if (pat == NULL)
     {
         fprintf (stderr, "out of memory\n");
+        bw_destroy (win);
+        bw_close ();
 
         return 2;
     }
@@ -112,6 +125,9 @@ int main (int argc, char **argv)
     if (capw <= 2 * MARGIN || caph <= 2 * MARGIN)
     {
         fprintf (stderr, "the window is too small to photograph\n");
+        bw_destroy (pat);
+        bw_destroy (win);
+        bw_close ();
 
         return 2;
     }
@@ -124,6 +140,13 @@ int main (int argc, char **argv)
         if (pop[i] == NULL)
         {
             fprintf (stderr, "no popup window\n");
+            while (i-- > 0)
+            {
+                bw_destroy (pop[i]);
+            }
+            bw_destroy (pat);
+            bw_destroy (win);
+            bw_close ();
 
             return 2;
         }
@@ -164,6 +187,13 @@ int main (int argc, char **argv)
         if (img == NULL)
         {
             fprintf (stderr, "capture failed\n");
+            for (i = 0; i < 3; i++)
+            {
+                bw_destroy (pop[i]);
+            }
+            bw_destroy (pat);
+            bw_destroy (win);
+            bw_close ();
 
             return 2;
         }

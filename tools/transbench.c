@@ -66,7 +66,7 @@ int main (int argc, char **argv)
         rate = 120.0;
     }
     int i, steps = 0;
-    int bgw, bgh, fgw, fgh, sx, sy, fg_up = 0;
+    int bgw, bgh, fgw, fgh, fillx, filly, sx, sy, fg_up = 0;
     long tasks, warm, done = 0;
     double start, mstart;
     unsigned long colours[6] = {
@@ -89,6 +89,14 @@ int main (int argc, char **argv)
         bgw = STAGE_MINW;
     }
     fgw = MIN (FGW, bgw - 220); fgh = MIN (FGH, bgh - 220);
+    if (fgw < 220)
+    {
+        fgw = 220;
+    }
+    if (fgh < 170)
+    {
+        fgh = 170;
+    }
     bg = bw_create (NULL, sx, sy, bgw, bgh, "transbench background",
                     BW_PLACED | BW_UNMANAGED);
     fg = bw_create (NULL, sx + 220, sy + 220, fgw, fgh,
@@ -131,9 +139,19 @@ int main (int argc, char **argv)
     bench_placed (fg, sx + 220, sy + 220, "transbench translucent");
 
     /* Detail underneath, so the blend has something to read */
+    fillx = bgw - 90;
+    if (fillx < 1)
+    {
+        fillx = 1;
+    }
+    filly = bgh - 70;
+    if (filly < 1)
+    {
+        filly = 1;
+    }
     for (i = 0; i < 400; i++)
     {
-        bw_fill (bg, colours[i % 6], (i * 37) % (bgw - 90), (i * 61) % (bgh - 70),
+        bw_fill (bg, colours[i % 6], (i * 37) % fillx, (i * 61) % filly,
                  90, 70);
     }
     bw_present (bg);

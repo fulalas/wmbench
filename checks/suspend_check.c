@@ -99,8 +99,11 @@ int main (int argc, char **argv)
     }
     else
     {
+        /* Position and size are held, as in stale_check: every capture aims at
+           where the window was first seen, and a manager moving it during the
+           fullscreen churn would turn every later capture into a false fault */
         win = bw_create (NULL, 140, 140, WINW, WINH, "suspend_check pattern",
-                         BW_PLACED);
+                         BW_PLACED | BW_FIXED | BW_AIMED);
     }
     if (win == NULL)
     {

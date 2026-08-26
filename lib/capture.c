@@ -78,6 +78,10 @@ static int ppm_token (FILE *f)
     }
     while (c >= '0' && c <= '9')
     {
+        if (v > 100000)
+        {
+            return -1;
+        }
         v = v * 10 + (c - '0');
         c = fgetc (f);
     }
@@ -181,7 +185,10 @@ bw_image *capture_via_cmd (int x, int y, int w, int h, int scale,
         return NULL;
     }
     snprintf (path, sizeof path, "/tmp/bench-capture-%ld.ppm", (long) getpid ());
-    snprintf (full, sizeof full, "%s %s", cmd, path);
+    if (snprintf (full, sizeof full, "%s %s", cmd, path) >= (int) sizeof full)
+    {
+        return NULL;
+    }
     if (system (full) != 0)
     {
         unlink (path);

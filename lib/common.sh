@@ -18,21 +18,22 @@
 # figure with no CPU figure reads like a whole-machine one and is wrong by the
 # entire CPU, and there is nothing in a bare number to say so.
 find_gpu_power () {
-    local h name label
+    local h name label want
 
-    for h in /sys/class/hwmon/hwmon*; do
-        [ -r "$h/power1_average" ] || continue
-        [ -r "$h/name" ] || continue
-        read -r name < "$h/name"
-        case "$name" in
-            amdgpu|k10temp)
-                label=none
-                [ -r "$h/power1_label" ] && read -r label < "$h/power1_label"
-                echo "$h/power1_average $label"
+    # amdgpu first whatever the hwmon numbering says: k10temp is the CPU
+    # package, and taken in glob order it can shadow the real graphics sensor
+    for want in amdgpu k10temp; do
+        for h in /sys/class/hwmon/hwmon*; do
+            [ -r "$h/power1_average" ] || continue
+            [ -r "$h/name" ] || continue
+            read -r name < "$h/name"
+            [ "$name" = "$want" ] || continue
+            label=none
+            [ -r "$h/power1_label" ] && read -r label < "$h/power1_label"
+            echo "$h/power1_average $label $name"
 
-                return 0
-                ;;
-        esac
+            return 0
+        done
     done
 
     return 1
@@ -94,11 +95,12 @@ find_nvidia_power () {
 }
 
 power_choose () {
-    POWER_HWMON=""; POWER_LABEL=""; POWER_ENERGY=""; POWER_GPU_ENERGY=""
+    POWER_HWMON=""; POWER_LABEL=""; POWER_NAME=""; POWER_ENERGY=""
+    POWER_GPU_ENERGY=""
     POWER_NVIDIA=""; POWER_DESC=""; POWER_OK=0; POWER_CPU_WANTED=1
     local gpu="" cpu=""
 
-    read -r POWER_HWMON POWER_LABEL <<< "$(find_gpu_power)"
+    read -r POWER_HWMON POWER_LABEL POWER_NAME <<< "$(find_gpu_power)"
     POWER_ENERGY=$(find_cpu_energy)
 
     if [ "$POWER_LABEL" = PPT ]; then
@@ -112,7 +114,16 @@ power_choose () {
         return 0
     fi
 
-    [ -n "$POWER_HWMON" ] && gpu="$POWER_HWMON (GPU)"
+    if [ "$POWER_NAME" = k10temp ]; then
+        # k10temp reads the CPU package, not a GPU: reported as GPU it stood
+        # in for a graphics figure it never was, and with RAPL on top the same
+        # package was counted twice
+        POWER_ENERGY=""
+        POWER_CPU_WANTED=0
+        cpu="$POWER_HWMON (CPU)"
+    elif [ -n "$POWER_HWMON" ]; then
+        gpu="$POWER_HWMON (GPU)"
+    fi
     if [ -z "$gpu" ]; then
         POWER_GPU_ENERGY=$(find_gpu_energy) && gpu="$POWER_GPU_ENERGY (GPU)"
     fi
@@ -134,8 +145,9 @@ power_choose () {
         POWER_DESC="$gpu only, the CPU cannot be read"
     else
         echo "Power will not be reported, and nothing will be guessed at." >&2
-        echo "  No graphics sensor: amdgpu and k10temp expose one in sysfs," >&2
-        echo "  an NVIDIA board needs nvidia-smi, nouveau has none at all." >&2
+        echo "  No power sensor: amdgpu exposes a graphics one in sysfs and" >&2
+        echo "  k10temp a CPU one, an NVIDIA board needs nvidia-smi, nouveau" >&2
+        echo "  has none at all." >&2
         if [ -n "$POWER_ENERGY_LOCKED" ]; then
             echo "  $POWER_ENERGY_LOCKED exists but is root-only. Unlock it with" >&2
             echo "  sudo chmod a+r $POWER_ENERGY_LOCKED" >&2
@@ -237,8 +249,15 @@ power_end () {
     if [ -n "$POWER_NV_PID" ]; then
         kill "$POWER_NV_PID" 2>/dev/null; wait "$POWER_NV_PID" 2>/dev/null
         nv=$(awk 'NF && $1 + 0 == $1 { s += $1; n++ }
-                  END { printf "%.3f", (n ? s / n : 0) }' "$POWER_NV_FILE")
+                  END { if (n) printf "%.3f", s / n }' "$POWER_NV_FILE")
         rm -f "$POWER_NV_FILE"
+        # A sampler that produced nothing is a failed read, not a zero: folding
+        # in 0 W would report a GPU that was never measured
+        if [ -z "$nv" ]; then
+            echo "-"
+
+            return 0
+        fi
     fi
     awk -v s="$POWER_SUM" -v n="$POWER_N" -v nv="$nv" \
         -v c0="$POWER_CPU_E0" -v c1="$cpu_e1" \

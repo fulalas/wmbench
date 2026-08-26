@@ -64,6 +64,13 @@ int main (int argc, char **argv)
     int clean = 0, incoherent = 0, foreign = 0, edge_bad = 0, blind = 0;
     int no_capture = 0;
 
+    /* Zero steps proves nothing and must not be reported as a failure */
+    if (steps < 1)
+    {
+        fprintf (stderr, "steps must be at least 1\n");
+
+        return 2;
+    }
     if (!bw_open ())
     {
         fprintf (stderr, "no display\n");
@@ -81,11 +88,16 @@ int main (int argc, char **argv)
     if (win == NULL)
     {
         fprintf (stderr, "no window\n");
+        bw_close ();
 
         return 2;
     }
     if (!bench_aimable (win))
     {
+        printf ("the screen cannot be photographed here, nothing proved\n");
+        bw_destroy (win);
+        bw_close ();
+
         return 3;
     }
     bw_map (win);
@@ -151,7 +163,13 @@ int main (int argc, char **argv)
         }
         if (img == NULL)
         {
-            no_capture++;
+            /* Warmup is unscored, and the pattern must keep moving even past
+               a failed capture or the next step repeats this offset */
+            if (s >= 0)
+            {
+                no_capture++;
+            }
+            offset += BAND / 4;
             continue;
         }
 

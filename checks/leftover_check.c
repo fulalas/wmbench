@@ -84,9 +84,12 @@ static unsigned char *covered_mask (Display *d, Window root, int w, int h)
     {
         return NULL;
     }
+    /* An unreadable tree is a failure to look, not an uncovered desktop */
     if (!XQueryTree (d, root, &rr, &parent, &kids, &n))
     {
-        return m;
+        free (m);
+
+        return NULL;
     }
     for (i = 0; i < n; i++)
     {

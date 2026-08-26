@@ -262,7 +262,10 @@ END {
                 val[k2, rows[j], n] = cnt[k2, rows[j], n] ?
                     sprintf ("%.2f", sum[k2, rows[j], n] / cnt[k2, rows[j], n]) : "-";
             }
-            if (rows[j] != "total" && val[k2, rows[j], 1] == "-") short[k2] = 1;
+            # Both columns: watts alone is "-" on every run whose machine has
+            # no power sensor, tests run and all
+            if (rows[j] != "total" && val[k2, rows[j], 1] == "-" &&
+                val[k2, rows[j], 2] == "-") short[k2] = 1;
         }
     }
 
