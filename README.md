@@ -2,7 +2,9 @@
 
 Benchmarks and visual defect tests for window managers. Works on any window
 manager, X11 or Wayland: it measures the session as it is, so two desktops can
-be put side by side.
+be put side by side. Whichever one is running is found by asking the session,
+not by matching a list of names, so a compositor nobody here has heard of still
+runs; what it cannot do is reported as not done rather than as a number.
 
     make                    build everything
     ./benchmark.sh          measure the session, print a table
@@ -10,10 +12,12 @@ be put side by side.
     ./compare_results.sh    put the saved runs side by side
 
 Both entry points build what they need, work out which compositor is running,
-and save their table under `results/`. Whichever window manager is running says
-so itself, so replacing one mid-session is noticed. A column that cannot be
-measured reads `-`: power with no sensor, compositor CPU with no visible
-process.
+and save their table under `results/`. On X11 the window manager says so itself
+through the window it owns; on Wayland, where the protocol says nothing about
+who is running, it is the process holding the display socket. Either way the
+answer is the compositor actually running, so replacing one mid-session is
+noticed. A column that cannot be measured reads `-`: power with no sensor,
+compositor CPU with no visible process.
 
 ## The two backends
 

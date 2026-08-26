@@ -505,6 +505,49 @@ x11_wm_check () {
     printf '%s\n%s\n' "$pid" "$name"
 }
 
+# The compositor of a Wayland session: the process that owns the display
+# socket. Nothing in the protocol says who that is, and a list of names only
+# ever knows the compositors somebody thought to add - jay, niri, dwl and the
+# rest were all "cannot tell what window manager this is". Echoes the pid on
+# one line and the process name on the next, or fails.
+#
+# The listening socket is asked first and the lock file only after: libwayland
+# opens the socket with CLOEXEC and the lock file without it, so every program
+# the compositor started holds a copy of the lock and only the compositor holds
+# the socket. Where both answer they agree; where the lock is all there is, the
+# compositor is the oldest of them, having made it before starting anything.
+wayland_socket_owner () {
+    local sock ino p pid
+    local -a targets
+    [ -n "${WAYLAND_DISPLAY:-}" ] || return 1
+    sock=$WAYLAND_DISPLAY
+    case "$sock" in
+        /*) ;;
+        *)  sock="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/$sock";;
+    esac
+
+    # State 01 is listening: the same path is on every client's end of it too
+    ino=$(awk -v s="$sock" '$6 == "01" && $NF == s { print $7; exit }' \
+          /proc/net/unix 2>/dev/null)
+    targets=("$sock.lock")
+    # The brackets are escaped because -lname takes a glob, and unescaped they
+    # would be a one-character class matching any digit of the inode
+    [ -n "$ino" ] && targets=("socket:\\[$ino\\]" "${targets[@]}")
+    for p in "${targets[@]}"; do
+        # One find rather than a readlink per descriptor: this runs before the
+        # first measurement, but a thousand forks is still a thousand forks
+        pid=$(find /proc/[0-9]*/fd -lname "$p" -print 2>/dev/null |
+              awk -F/ '{print $3}' | sort -n | head -1)
+        [ -n "$pid" ] || continue
+        [ -r "/proc/$pid/comm" ] || continue
+        printf '%s\n%s\n' "$pid" "$(< "/proc/$pid/comm")"
+
+        return 0
+    done
+
+    return 1
+}
+
 # A published window manager name, or a process name, as the short name used
 # here and in the result file names, so no spaces and no capitals.
 wm_canon () {
@@ -529,12 +572,13 @@ wm_canon () {
 # WM_PID, the process whose CPU time is the compositor's, and WM_PIDS,
 # that process together with any helper of its own that draws.
 #
-# On X11 the running window manager is asked first, because it is the only
-# source that keeps up when one replaces another mid-session: after
-# compiz --replace the desktop still says XFCE, and going by that alone reports
-# a session as xfwm4 that has no xfwm4 in it. Wayland has nothing to ask, so
-# there the desktop names the candidates and only a name with a live process
-# behind it is taken.
+# The running window manager is asked first, because it is the only source that
+# keeps up when one replaces another mid-session: after compiz --replace the
+# desktop still says XFCE, and going by that alone reports a session as xfwm4
+# that has no xfwm4 in it. On X11 that is the window it owns; on Wayland, where
+# the protocol says nothing about who is running, it is the process holding the
+# display socket. Only when neither answers does the desktop name candidates,
+# and then only a name with a live process behind it is taken.
 detect_wm () {
     local desktop=${XDG_CURRENT_DESKTOP:-} st p cand="" dcand="" name="" pid=""
     local helpers=""
@@ -543,11 +587,13 @@ detect_wm () {
 
     if [ "$st" = x11 ]; then
         { read -r pid; read -r name; } <<< "$(x11_wm_check)"
-        [ -n "$name" ] && WM_NAME=$(wm_canon "$name")
-        # A pid nothing can be read from is no pid: containers and some setups
-        # hide the process, and it is then worth looking for it by name below
-        [ -n "$pid" ] && [ -r "/proc/$pid/stat" ] && WM_PID=$pid
+    else
+        { read -r pid; read -r name; } <<< "$(wayland_socket_owner)"
     fi
+    [ -n "$name" ] && WM_NAME=$(wm_canon "$name")
+    # A pid nothing can be read from is no pid: containers and some setups
+    # hide the process, and it is then worth looking for it by name below
+    [ -n "$pid" ] && [ -r "/proc/$pid/stat" ] && WM_PID=$pid
 
     case "$desktop" in
         *GNOME*)                 dcand="mutter gnome-shell";;
@@ -557,12 +603,19 @@ detect_wm () {
         *MATE*)                  dcand="marco";;
         *LXQt*|*LXDE*)           dcand="labwc openbox";;
         *XFCE*)                  dcand="labwc xfwm4";;
+        # A desktop that names only its own compositor - niri, Hyprland, jay -
+        # needs no arm of its own. The last field is the most specific one:
+        # "wlroots:sway" is sway.
+        *) dcand=$(echo "${desktop##*:}" | tr '[:upper:]' '[:lower:]' |
+                   tr -cd 'a-z0-9._-');;
     esac
     # Whatever the desktop is, and whatever it failed to mention. The name from
     # the screen goes first: that one is known to be the right answer, and all
     # that is missing is its process.
     cand="$WM_NAME $dcand xfwm4 compiz kwin_x11 kwin_wayland labwc openbox marco
-          metacity cosmic-comp mutter muffin gnome-shell cinnamon sway"
+          metacity cosmic-comp mutter muffin gnome-shell cinnamon sway
+          hyprland Hyprland niri jay river wayfire dwl weston
+          i3 awesome fluxbox icewm"
 
     if [ -z "$WM_PID" ]; then
         for p in $cand; do
@@ -616,6 +669,18 @@ pick_capture_cmd () {
 
     return 1
 }
+
+# Every wait for a load is bounded, and by the clock rather than by whether the
+# process still exists. A load stuck on a compositor that never answers stays
+# alive saying nothing, and a wait that only asks whether it is alive then holds
+# the whole run with a blank screen - which is what a compositor nobody had
+# tried did. A wait that runs out is a failed row with its log kept.
+#
+# The gap between the two is deliberate: setting a window up takes seconds, so a
+# minute there is already far out, while the work itself legitimately takes as
+# long as the machine needs, so only a stall can reach ten minutes.
+BENCH_START_TIMEOUT=${BENCH_START_TIMEOUT:-60}
+BENCH_RUN_TIMEOUT=${BENCH_RUN_TIMEOUT:-600}
 
 # The stress mix, defined once because both scripts have to mean the same load
 # by it: benchmark.sh measures it, validate.sh watches it for artifacts.
@@ -730,14 +795,25 @@ stress_load () {                # $1 name, $2 tasks, $3 window, $4... program
 # Wait until every load is set up and waiting at the gate. A program still
 # drawing its content when the gate opens is not held by it: it would start as
 # late as its setup took and stagger the whole mix by that much.
+#
+# One that never gets there is killed rather than waited on: the loops after
+# this one wait on the same programs, and a mix missing a load is not the mix
+# anyway, so the row has to fail whatever happens next.
 stress_wait_ready () {
-    local i left=1
+    local i left=1 deadline=$((SECONDS + BENCH_START_TIMEOUT))
 
     while [ "$left" = 1 ]; do
         left=0
         for i in "${!STRESS_LOGS[@]}"; do
             grep -q MEASURE-READY "${STRESS_LOGS[$i]}" 2>/dev/null && continue
             kill -0 "${STRESS_PIDS[$i]}" 2>/dev/null || continue
+            if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "never reached the gate, killed after ${BENCH_START_TIMEOUT}s" \
+                    >> "${STRESS_LOGS[$i]}"
+                kill "${STRESS_PIDS[$i]}" 2>/dev/null
+                STRESS_LATE=1
+                continue
+            fi
             left=1
         done
         [ "$left" = 1 ] && sleep 0.1

@@ -113,7 +113,15 @@ if [ "$PIXELS" = 1 ]; then
     echo "== artifact checks"
     for c in $CHECKS; do
         case "$c" in motion) n=$MOTION;; resize) n=$RESIZE;; *) n=$CHK;; esac
-        ./checks/${c}_check "$n" > "va-$c.txt" 2>&1; rc=$?
+        # A check waiting on a compositor that never answers would hold the run
+        # for ever, with nothing said and nothing on screen
+        timeout "$BENCH_RUN_TIMEOUT" ./checks/${c}_check "$n" \
+            > "va-$c.txt" 2>&1; rc=$?
+        if [ "$rc" = 124 ]; then
+            echo "stopped after ${BENCH_RUN_TIMEOUT}s without finishing" \
+                >> "va-$c.txt"
+            rc=2
+        fi
         why=$(tail -1 "va-$c.txt")
         [ -n "$why" ] || why="said nothing at all, and left with status $rc"
         report "${c}_check" $rc "$why"
@@ -128,7 +136,8 @@ echo
 # move is caught. Named at the end of the run, not talked about here.
 CK="results/frames-$(date +%Y%m%d-%H%M%S)-$(hostname)-$DE-$WM_NAME-$ST"
 mkdir -p "$CK"
-BENCH_CHECKPOINT_DIR="$CK" ./tools/usagebench 0 3 > va-usage-ck.log 2>&1
+BENCH_CHECKPOINT_DIR="$CK" timeout "$BENCH_RUN_TIMEOUT" \
+    ./tools/usagebench 0 3 > va-usage-ck.log 2>&1
 
 # What the idle desktop looks like before any of this, to be compared with the
 # same desktop once the load is over and gone. Windows are left out of it, so a
@@ -137,7 +146,8 @@ SHOT=""
 BASE="${TMPDIR:-/tmp}/wmbench-screen-$$.ppm"
 if [ "$PIXELS" = 1 ]; then
     sleep 1                     # let the checkpoint pass finish disappearing
-    ./checks/leftover_check save "$BASE" > va-left.txt 2>&1 && SHOT=$BASE
+    timeout "$BENCH_START_TIMEOUT" ./checks/leftover_check save "$BASE" \
+        > va-left.txt 2>&1 && SHOT=$BASE
 fi
 
 echo "== stability"
@@ -233,7 +243,9 @@ fi
 # Everything is gone now: is the desktop the one photographed before it?
 if [ -n "$SHOT" ]; then
     sleep 3                     # closing animations are not leftovers
-    ./checks/leftover_check check "$SHOT" >> va-left.txt 2>&1; rc=$?
+    timeout "$BENCH_START_TIMEOUT" ./checks/leftover_check check "$SHOT" \
+        >> va-left.txt 2>&1; rc=$?
+    [ "$rc" = 124 ] && rc=2
     report leftovers $rc "$(tail -1 va-left.txt)"
 elif [ "$PIXELS" = 1 ]; then
     report leftovers 3 ""

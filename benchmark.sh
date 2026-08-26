@@ -185,24 +185,42 @@ idle_window () {
 }
 
 measure () {
-    local name=$1 tasks=$2 log pid t0 t1 c0 c1 w
+    local name=$1 tasks=$2 log pid t0 t1 c0 c1 w deadline
     shift 2
     log="bm-$name.log"
     : > "$log"
     BENCH_TASKS=$tasks "$@" >> "$log" 2>&1 &
     pid=$!
 
+    deadline=$((SECONDS + BENCH_START_TIMEOUT))
     while ! grep -q MEASURE-START "$log" 2>/dev/null; do
         # A load can refuse before the measurement even starts - a Wayland
         # session with nothing to ask for - and 3 means refused, not broken
         kill -0 "$pid" 2>/dev/null || { wait "$pid"
                                         [ "$?" = 3 ] && return 3
                                         return 1; }
+        if [ "$SECONDS" -ge "$deadline" ]; then
+            # Never the marker's own name in the message: the log is what is
+            # searched for the markers, and a line saying one is missing would
+            # be read back as the marker itself
+            echo "killed after ${BENCH_START_TIMEOUT}s: never began measuring" \
+                >> "$log"
+            kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+
+            return 1
+        fi
         sleep 0.1
     done
     t0=$(now_s); c0=$(comp_cpu); power_begin
+    deadline=$((SECONDS + BENCH_RUN_TIMEOUT))
     while ! grep -q MEASURE-END "$log" 2>/dev/null; do
         kill -0 "$pid" 2>/dev/null || break
+        if [ "$SECONDS" -ge "$deadline" ]; then
+            echo "killed after ${BENCH_RUN_TIMEOUT}s: never finished its work" \
+                >> "$log"
+            kill "$pid" 2>/dev/null
+            break
+        fi
         power_sample
         sleep 0.1
     done
@@ -351,18 +369,37 @@ if want stress; then
     : > "$GO"
 
     for i in "${!SL[@]}"; do
+        SDL=$((SECONDS + BENCH_START_TIMEOUT))
         while ! grep -q MEASURE-START "${SL[$i]}" 2>/dev/null; do
             # A load that died before the gate never writes it: without this
             # break the wait never ends
             kill -0 "${SP[$i]}" 2>/dev/null || break
+            if [ "$SECONDS" -ge "$SDL" ]; then
+                echo "killed after ${BENCH_START_TIMEOUT}s: never began measuring" \
+                    >> "${SL[$i]}"
+                kill "${SP[$i]}" 2>/dev/null
+                break
+            fi
             sleep 0.1
         done
     done
     T0=$(now_s); C0=$(comp_cpu); power_begin
     OK=1; LEFT=${#SL[@]}
+    SDL=$((SECONDS + BENCH_RUN_TIMEOUT))
     while [ "$LEFT" -gt 0 ]; do
         power_sample
         sleep 0.1
+        # Killed, not merely given up on: the loop below counts a load as done
+        # when its process goes, and one left running would go on drawing over
+        # the test after this one
+        if [ "$SECONDS" -ge "$SDL" ]; then
+            for i in "${!SP[@]}"; do
+                kill -0 "${SP[$i]}" 2>/dev/null || continue
+                echo "killed after ${BENCH_RUN_TIMEOUT}s: never finished its work" \
+                    >> "${SL[$i]}"
+                kill "${SP[$i]}" 2>/dev/null
+            done
+        fi
         LEFT=0
         for i in "${!SL[@]}"; do
             [ -n "${SEND[$i]:-}" ] && continue
