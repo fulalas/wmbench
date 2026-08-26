@@ -21,9 +21,9 @@
 #include <unistd.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
-#include "capture.h"
 #include <X11/Xatom.h>
 #include <X11/extensions/shape.h>
+#include "win.h"
 
 #define BGW     1000
 #define BGH     760
@@ -61,12 +61,26 @@ int main (int argc, char **argv)
     Display *d;
     Window root, bg, fg, child;
     GC gc;
-    XImage *img;
+    bw_image *img;
     XRectangle band;
     XWindowAttributes bga, fga;
     int scr, ev, err, rounds = (argc > 1) ? atoi (argv[1]) : 2;
     int r, y, bx, by, fx, fy, ok = 0, bad = 0;
 
+    if (!bw_open ())
+    {
+        fprintf (stderr, "no display\n");
+
+        return 2;
+    }
+    if (bw_is_wayland ())
+    {
+        printf ("wayland has no shape concept; the defect lives in "
+                "per-pixel alpha there, which argbbench exercises\n");
+
+        return 3;
+    }
+    /* The shape extension is X11's own; asked of X11 directly */
     d = XOpenDisplay (NULL);
     if (d == NULL)
     {
@@ -142,7 +156,7 @@ int main (int argc, char **argv)
         XSync (d, False);
         usleep (700000);
 
-        img = capture_region (d, root, fx, fy, FGW, FGH);
+        img = bw_capture (fx, fy, FGW, FGH);
         if (img == NULL)
         {
             fprintf (stderr, "capture failed\n");
@@ -155,9 +169,9 @@ int main (int argc, char **argv)
             unsigned long inside, outside;
 
             /* Inside the band: the shaped window's own colour */
-            inside = XGetPixel (img, BANDX + BANDW / 2, y) & 0xffffff;
+            inside = bw_pixel (img, BANDX + BANDW / 2, y);
             /* Left of the band, still inside the window box: the background */
-            outside = XGetPixel (img, BANDX / 2, y) & 0xffffff;
+            outside = bw_pixel (img, BANDX / 2, y);
             checked++;
 
             if (inside != FG_COLOUR)
@@ -169,7 +183,7 @@ int main (int argc, char **argv)
                 wrong_out++;
             }
         }
-        XDestroyImage (img);
+        bw_image_free (img);
 
         if (wrong_in == 0 && wrong_out == 0)
         {
@@ -187,6 +201,7 @@ int main (int argc, char **argv)
     XDestroyWindow (d, fg);
     XDestroyWindow (d, bg);
     XCloseDisplay (d);
+    bw_close ();
 
     printf ("shaped windows: %d clean, %d wrong\n", ok, bad);
 

@@ -1,25 +1,27 @@
-/*
- * One way to photograph the screen for every check.
- *
- * On plain X11 it is XGetImage on the root, same as always. Under a Wayland
- * compositor that only shows XWayland's idea of the screen, not the real one,
- * so when BENCH_CAPTURE_CMD is set it runs that command instead; the command
- * gets one argument, a path, and must write a full-screen binary PPM (P6)
- * there. The region is then cut out of that image.
- *
- * The result behaves like any XImage: XGetPixel and XDestroyImage work.
- */
+/* BENCH_CAPTURE_CMD gets one argument, a path, and must write a full-screen
+   binary PPM (P6) there */
 #ifndef BENCH_CAPTURE_H
 #define BENCH_CAPTURE_H
 
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
+typedef struct {
+    int width, height;
+    void *xim;                  /* an XImage, when the X server answered */
+    unsigned char *rgb;         /* 3 bytes a pixel, when a screenshot file did */
+} bw_image;
 
-XImage *capture_region (Display *d, Window root,
-                        int x, int y, unsigned int w, unsigned int h);
+unsigned long bw_pixel (const bw_image *, int x, int y);
+void bw_image_free (bw_image *);
 
-/* And back out again, as a binary PPM (P6). True when the whole file is
-   written. The one format the checks and the checkpoints both save in. */
-int capture_write_ppm (const char *path, XImage *img);
+/* True when the whole file is written */
+int capture_write_ppm (const char *path, const bw_image *);
+
+/*
+ * The file must be exactly screen_w x screen_h or nothing is returned: a
+ * check that quietly looks at the wrong place is worse than one that says it
+ * could not look. scale maps the caller's coordinates onto the file's pixels.
+ */
+bw_image *capture_via_cmd (int x, int y, int w, int h, int scale,
+                           int screen_w, int screen_h);
+bw_image *capture_wrap_ximage (void *xim);
 
 #endif

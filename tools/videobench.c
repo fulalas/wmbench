@@ -4,11 +4,10 @@
  *
  * The difference from every other benchmark in this directory is where the
  * window's pixels come from. Everything else either renders with OpenGL or
- * draws with X primitives; a player hands over a buffer of pixels it made
- * itself, with XShmPutImage. The pixmap the compositor then samples as a
- * texture has been filled by the CPU, and may not be laid out the way a
- * GPU-rendered one is. If sampling it is slow, this is where the OpenGL
- * renderer would lose.
+ * draws with server primitives; a player hands over a whole buffer of pixels
+ * it made itself. The pixmap the compositor then samples as a texture has
+ * been filled by the CPU, and may not be laid out the way a GPU-rendered one
+ * is. If sampling it is slow, this is where the OpenGL renderer would lose.
  *
  *   videobench <seconds> [frames per second] [width] [height]
  *
@@ -19,15 +18,10 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#include <sys/ipc.h>
-#include <sys/shm.h>
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include <X11/Xatom.h>
-#include <X11/extensions/XShm.h>
 
 #include "gate.h"
 #include "now.h"
+#include "win.h"
 #include "place.h"
 
 /*
@@ -55,13 +49,7 @@ static void mark (const char *s)
 
 int main (int argc, char **argv)
 {
-    Display *d;
-    Window win, root;
-    GC gc;
-    XShmSegmentInfo shm;
-    XImage *img;
-    XSizeHints hints;
-    Atom wtype, normal;
+    bw_win *win;
     double seconds = (argc > 1) ? atof (argv[1]) : 12.0;
     double rate = (argc > 2) ? atof (argv[2]) : 60.0;
 
@@ -74,95 +62,40 @@ int main (int argc, char **argv)
 
     /* The frame loop writes four pixels at a time */
     w &= ~3;
-    int scr, i, x, y, frames = 0, major, minor, warm;
+    int i, x, y, frames = 0, warm, stride;
     long tasks, done = 0;
-    Bool pixmaps;
     double start, mstart;
 
-    d = XOpenDisplay (NULL);
-    if (d == NULL)
+    if (!bw_open ())
     {
         fprintf (stderr, "no display\n");
 
         return 2;
     }
-    if (!XShmQueryVersion (d, &major, &minor, &pixmaps))
+
+    win = bw_create (NULL, 100, 100, w, h, "videobench",
+                     BW_PLACED | BW_UNMANAGED);
+    if (win == NULL)
     {
-        fprintf (stderr, "no XShm\n");
+        fprintf (stderr, "no window\n");
 
         return 2;
     }
-    scr = DefaultScreen (d);
-    root = RootWindow (d, scr);
-
-    win = XCreateSimpleWindow (d, root, 100, 100, w, h, 0,
-                               BlackPixel (d, scr), BlackPixel (d, scr));
-    hints.flags = USPosition | USSize | PPosition | PSize;
-    hints.x = 100; hints.y = 100; hints.width = w; hints.height = h;
-    XSetWMNormalHints (d, win, &hints);
-    wtype = XInternAtom (d, "_NET_WM_WINDOW_TYPE", False);
-    normal = XInternAtom (d, "_NET_WM_WINDOW_TYPE_NORMAL", False);
-    XChangeProperty (d, win, wtype, XA_ATOM, 32, PropModeReplace,
-                     (unsigned char *) &normal, 1);
-    XStoreName (d, win, "videobench");
-    XMapWindow (d, win);
-    gc = XCreateGC (d, win, 0, NULL);
-    XSync (d, False);
+    bw_map (win);
+    bw_sync ();
     sleep (2);
-    bench_placed (d, win, 100, 100, "videobench");
+    bench_placed (win, 100, 100, "videobench");
 
-    memset (&shm, 0, sizeof shm);
-    img = XShmCreateImage (d, DefaultVisual (d, scr), DefaultDepth (d, scr),
-                           ZPixmap, NULL, &shm, w, h);
-    if (img == NULL)
+    if (bw_frame_pixels (win, &stride) == NULL)
     {
-        fprintf (stderr, "XShmCreateImage failed\n");
+        fprintf (stderr, "no way to hand whole frames over on this session\n");
 
         return 2;
     }
-    /* The frame loop writes 32-bit pixels; anything else would overrun */
-    if (img->bits_per_pixel != 32)
-    {
-        fprintf (stderr, "needs a 32-bit visual, this one is %d\n",
-                 img->bits_per_pixel);
-
-        return 2;
-    }
-    shm.shmid = shmget (IPC_PRIVATE, img->bytes_per_line * img->height,
-                        IPC_CREAT | 0600);
-    if (shm.shmid < 0)
-    {
-        fprintf (stderr, "shmget failed\n");
-
-        return 2;
-    }
-    shm.shmaddr = shmat (shm.shmid, NULL, 0);
-    if (shm.shmaddr == (void *) -1)
-    {
-        fprintf (stderr, "shmat failed\n");
-        shmctl (shm.shmid, IPC_RMID, NULL);
-
-        return 2;
-    }
-    img->data = shm.shmaddr;
-    shm.readOnly = False;
-    if (!XShmAttach (d, &shm))
-    {
-        fprintf (stderr, "XShmAttach failed\n");
-        shmdt (shm.shmaddr);
-        shmctl (shm.shmid, IPC_RMID, NULL);
-
-        return 2;
-    }
-    XSync (d, False);
-    /*
-     * Marked for removal now the server has it, since the sync above has
-     * already carried the attach there: the kernel frees the segment when the
-     * last attach goes away, so nothing this program can die of - benchmark.sh
-     * kills the whole process group on Ctrl-C - leaves 8 MB behind for the
-     * lifetime of the machine.
-     */
-    shmctl (shm.shmid, IPC_RMID, NULL);
+    /* A loop that filled only the asked-for corner of a HiDPI window would
+       hand the compositor a frame of undefined pixels */
+    bw_frame_size (win, &w, &h);
+    w &= ~3;
 
     tasks = bench_tasks ();
     warm = (tasks > 0) ? 10 : 0;
@@ -171,12 +104,20 @@ int main (int argc, char **argv)
     for (i = 0; ; i++)
     {
         double due = start + i / rate;
+        /* Asked for again each frame: the Wayland backend rotates buffers */
+        char *data = bw_frame_pixels (win, &stride);
 
+        if (data == NULL)
+        {
+            fprintf (stderr, "the session took the frame buffer away\n");
+
+            return 2;
+        }
         /* A cheap moving pattern, the way a decoder hands over a new frame */
         for (y = 0; y < h; y++)
         {
             unsigned int *row = (unsigned int *)
-                (img->data + (size_t) y * img->bytes_per_line);
+                (data + (size_t) y * stride);
             unsigned int v = (unsigned int) (((y + i * 3) & 0xff) << 8);
 
             for (x = 0; x < w; x += 4)
@@ -187,8 +128,8 @@ int main (int argc, char **argv)
                 row[x + 3] = v;
             }
         }
-        XShmPutImage (d, win, gc, img, 0, 0, 0, 0, w, h, False);
-        XSync (d, False);
+        bw_frame_push (win);
+        bw_sync ();
         frames++;
 
         if (tasks > 0)
@@ -219,10 +160,7 @@ int main (int argc, char **argv)
             break;
         }
 
-        while (bench_now () < due)
-        {
-            usleep (200);
-        }
+        bench_wait_until (due);
     }
 
     if (tasks > 0)
@@ -237,11 +175,8 @@ int main (int argc, char **argv)
                 frames / (bench_now () - start), seconds);
     }
 
-    XShmDetach (d, &shm);
-    XDestroyImage (img);
-    shmdt (shm.shmaddr);
-    XDestroyWindow (d, win);
-    XCloseDisplay (d);
+    bw_destroy (win);
+    bw_close ();
 
     return 0;
 }

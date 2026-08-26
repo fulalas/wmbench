@@ -3,6 +3,10 @@ tools/*
 checks/*
 !tools/*.c
 !checks/*.c
+lib/protocols/*-protocol.c
+lib/protocols/*-client-protocol.h
+lib/*.o
+lib/protocols/*.o
 
 # what a run leaves behind
 results/

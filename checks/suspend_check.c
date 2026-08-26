@@ -19,11 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include "capture.h"
-#include "polite.h"
-#include <X11/Xatom.h>
+#include "win.h"
 
 #define BAND    40
 #define NCOL    8
@@ -56,33 +52,14 @@ static int colour_index (unsigned long pixel)
     return -1;
 }
 
-/* Ask the window manager to put a window fullscreen, or take it out again */
-static void set_fullscreen (Display *d, Window w, int on)
-{
-    XClientMessageEvent ev;
-
-    memset (&ev, 0, sizeof ev);
-    ev.type = ClientMessage;
-    ev.window = w;
-    ev.message_type = XInternAtom (d, "_NET_WM_STATE", False);
-    ev.format = 32;
-    ev.data.l[0] = on ? 1 : 0;
-    ev.data.l[1] = XInternAtom (d, "_NET_WM_STATE_FULLSCREEN", False);
-    ev.data.l[3] = 1;
-    XSendEvent (d, DefaultRootWindow (d), False,
-                SubstructureNotifyMask | SubstructureRedirectMask,
-                (XEvent *) &ev);
-    XFlush (d);
-}
-
 /* Every sampled pixel is the colour the pattern calls for */
-static int capture_matches (Display *d, Window root, int ox, int oy)
+static int capture_matches (int ox, int oy)
 {
-    XImage *img;
+    bw_image *img;
     int x, y, ok = 1;
 
-    img = capture_region (d, root, ox + MARGIN, oy + MARGIN,
-                     WINW - 2 * MARGIN, WINH - 2 * MARGIN);
+    img = bw_capture (ox + MARGIN, oy + MARGIN,
+                      WINW - 2 * MARGIN, WINH - 2 * MARGIN);
     if (img == NULL)
     {
         return -1;
@@ -93,54 +70,56 @@ static int capture_matches (Display *d, Window root, int ox, int oy)
         {
             int px = (img->width / 6) * (x + 1);
 
-            if (colour_index (XGetPixel (img, px, y)) != band_of (y + MARGIN))
+            if (colour_index (bw_pixel (img, px, y)) != band_of (y + MARGIN))
             {
                 ok = 0;
                 break;
             }
         }
     }
-    XDestroyImage (img);
+    bw_image_free (img);
 
     return ok;
 }
 
 int main (int argc, char **argv)
 {
-    Display *d;
-    Window root, win, fs, child;
-    GC gc, gcfs;
-    XSizeHints hints;
-    Atom wtype, normal;
-    int scr, rounds = (argc > 1) ? atoi (argv[1]) : 3;
+    bw_win *win, *fs;
+    int rounds = (argc > 1) ? atoi (argv[1]) : 3;
     int r, i, y, ox, oy, ok = 0, bad = 0, inconclusive = 0;
 
-    d = XOpenDisplay (NULL);
-    if (d == NULL)
+    if (!bw_open ())
     {
         fprintf (stderr, "no display\n");
 
         return 2;
     }
-    scr = DefaultScreen (d);
-    root = RootWindow (d, scr);
-    wtype = XInternAtom (d, "_NET_WM_WINDOW_TYPE", False);
-    normal = XInternAtom (d, "_NET_WM_WINDOW_TYPE_NORMAL", False);
 
-    win = XCreateSimpleWindow (d, root, 140, 140, WINW, WINH, 0,
-                               BlackPixel (d, scr), BlackPixel (d, scr));
-    hints.flags = USPosition | USSize | PPosition | PSize;
-    hints.x = 140; hints.y = 140; hints.width = WINW; hints.height = WINH;
-    XSetWMNormalHints (d, win, &hints);
-    XChangeProperty (d, win, wtype, XA_ATOM, 32, PropModeReplace,
-                     (unsigned char *) &normal, 1);
-    XStoreName (d, win, "suspend_check pattern");
-    XMapWindow (d, win);
-    gc = XCreateGC (d, win, 0, NULL);
-    XSync (d, False);
+    if (bw_is_wayland ())
+    {
+        /* Fullscreen, so the origin is known without asking anyone */
+        win = bw_create (NULL, 0, 0, WINW, WINH, "suspend_check pattern", 0);
+        if (win != NULL)
+        {
+            bw_fullscreen (win, 1);
+        }
+    }
+    else
+    {
+        win = bw_create (NULL, 140, 140, WINW, WINH, "suspend_check pattern",
+                         BW_PLACED);
+    }
+    if (win == NULL)
+    {
+        fprintf (stderr, "no window\n");
+
+        return 2;
+    }
+    bw_map (win);
+    bw_sync ();
     sleep (3);
 
-    XTranslateCoordinates (d, win, root, 0, 0, &ox, &oy, &child);
+    bw_where (win, &ox, &oy, NULL, NULL);
 
     for (r = 0; r < rounds; r++)
     {
@@ -151,10 +130,10 @@ int main (int argc, char **argv)
 
         for (y = 0; y < WINH; y += BAND)
         {
-            XSetForeground (d, gc, palette[band_of (y)]);
-            XFillRectangle (d, win, gc, 0, y, WINW, BAND);
+            bw_fill (win, palette[band_of (y)], 0, y, WINW, BAND);
         }
-        XSync (d, False);
+        bw_present (win);
+        bw_sync ();
         usleep (300000);
 
         /*
@@ -162,56 +141,48 @@ int main (int argc, char **argv)
          * anything about bypassing the compositor: the category the option acts
          * on. Compositing should suspend while it has focus.
          */
-        fs = XCreateSimpleWindow (d, root, 0, 0, 800, 600, 0,
-                                  BlackPixel (d, scr), BlackPixel (d, scr));
-        XChangeProperty (d, fs, wtype, XA_ATOM, 32, PropModeReplace,
-                         (unsigned char *) &normal, 1);
-        XStoreName (d, fs, "suspend_check fullscreen");
-        /*
-         * The suspend only fires for the window that has the focus, so this
-         * has to ask for it. Without the input hint the manager may never give
-         * it, and then the whole check passes without having tested anything.
-         */
+        fs = bw_create (NULL, 0, 0, 800, 600, "suspend_check fullscreen",
+                        BW_NOTIFY);
+        if (fs == NULL)
         {
-            XWMHints wm;
+            fprintf (stderr, "no window\n");
 
-            wm.flags = InputHint | StateHint;
-            wm.input = True;
-            wm.initial_state = NormalState;
-            XSetWMHints (d, fs, &wm);
+            return 2;
         }
-        XSelectInput (d, fs, StructureNotifyMask | FocusChangeMask);
-        XMapRaised (d, fs);
-        XSync (d, False);
-        sleep (1);
-        gcfs = XCreateGC (d, fs, 0, NULL);
-
-        set_fullscreen (d, fs, 1);
-        XSync (d, False);
+        bw_map (fs);
+        bw_sync ();
         sleep (1);
 
-        /* Ask the manager to activate it, then take the focus directly too */
-        polite_activate (d, root, fs);
-        XSetInputFocus (d, fs, RevertToPointerRoot, CurrentTime);
-        XSync (d, False);
+        bw_fullscreen (fs, 1);
+        bw_sync ();
+        sleep (1);
+
+        /*
+         * The suspend only fires for the window that has the focus, so it is
+         * asked for - politely, or the manager calls it focus stealing - and
+         * then taken outright, since a manager that ignores the polite ask
+         * would leave this round testing nothing.
+         */
+        bw_activate (fs);
+        bw_take_focus (fs);
+        bw_sync ();
         sleep (2);
         /* Draw in it, so the suspended path has real work going through it */
         for (i = 0; i < 30; i++)
         {
-            XSetForeground (d, gcfs, palette[i % NCOL]);
-            XFillRectangle (d, fs, gcfs, (i * 97) % 1200, (i * 61) % 800,
-                            500, 400);
-            XSync (d, False);
+            bw_fill (fs, palette[i % NCOL], (i * 97) % 1200, (i * 61) % 800,
+                     500, 400);
+            bw_present (fs);
+            bw_sync ();
             usleep (30000);
         }
 
         /* Out of fullscreen, then gone: compositing has to resume */
-        set_fullscreen (d, fs, 0);
-        XSync (d, False);
+        bw_fullscreen (fs, 0);
+        bw_sync ();
         sleep (1);
-        XFreeGC (d, gcfs);
-        XDestroyWindow (d, fs);
-        XSync (d, False);
+        bw_destroy (fs);
+        bw_sync ();
         sleep (2);
 
         /*
@@ -223,7 +194,7 @@ int main (int argc, char **argv)
          * pixmap. If this capture still matches, the suspend never fired and
          * the round has tested nothing, which is worth saying out loud.
          */
-        if (capture_matches (d, root, ox, oy) == 1)
+        if (capture_matches (ox, oy) == 1)
         {
             printf ("round %d: contents survived, so compositing never "
                     "suspended and this round proves nothing\n", r + 1);
@@ -233,13 +204,13 @@ int main (int argc, char **argv)
         /* Now redraw: does what the client draws after the resume get through? */
         for (y = 0; y < WINH; y += BAND)
         {
-            XSetForeground (d, gc, palette[band_of (y)]);
-            XFillRectangle (d, win, gc, 0, y, WINW, BAND);
+            bw_fill (win, palette[band_of (y)], 0, y, WINW, BAND);
         }
-        XSync (d, False);
+        bw_present (win);
+        bw_sync ();
         usleep (600000);
 
-        switch (capture_matches (d, root, ox, oy))
+        switch (capture_matches (ox, oy))
         {
             case 1:
                 ok++;
@@ -256,8 +227,8 @@ int main (int argc, char **argv)
         inconclusive += unproven;
     }
 
-    XDestroyWindow (d, win);
-    XCloseDisplay (d);
+    bw_destroy (win);
+    bw_close ();
 
     printf ("suspend and resume: %d clean, %d wrong, %d proved nothing\n",
             ok, bad, inconclusive);

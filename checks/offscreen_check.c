@@ -23,9 +23,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include "capture.h"
+#include "win.h"
+#include "place.h"
 
 #define BAND    40
 #define NCOL     8
@@ -61,34 +60,32 @@ static int colour_index (unsigned long pixel)
 
 int main (int argc, char **argv)
 {
-    Display *d;
-    Window root, win;
-    GC gc;
-    XSetWindowAttributes swa;
-    XImage *img;
-    int scr, rounds = (argc > 1) ? atoi (argv[1]) : 3;
+    bw_win *win;
+    bw_image *img;
+    int rounds = (argc > 1) ? atoi (argv[1]) : 3;
     int r, x, y, ok = 0, bad = 0, blind = 0;
 
-    d = XOpenDisplay (NULL);
-    if (d == NULL)
+    if (!bw_open ())
     {
         fprintf (stderr, "no display\n");
 
         return 2;
     }
-    scr = DefaultScreen (d);
-    root = RootWindow (d, scr);
 
-    /* Override redirect: a manager would refuse to place this off screen */
-    memset (&swa, 0, sizeof swa);
-    swa.override_redirect = True;
-    swa.background_pixel = BlackPixel (d, scr);
-    win = XCreateWindow (d, root, -OFFX, -OFFY, WINW, WINH, 0, CopyFromParent,
-                         InputOutput, CopyFromParent,
-                         CWOverrideRedirect | CWBackPixel, &swa);
-    XMapRaised (d, win);
-    gc = XCreateGC (d, win, 0, NULL);
-    XSync (d, False);
+    win = bw_create (NULL, -OFFX, -OFFY, WINW, WINH, NULL, BW_POPUP);
+    if (win == NULL)
+    {
+        fprintf (stderr, "no window\n");
+
+        return 2;
+    }
+    if (!bench_aimable (win))
+    {
+        return 3;
+    }
+    bw_map (win);
+    bw_raise (win);
+    bw_sync ();
     sleep (2);
 
     for (r = 0; r < rounds; r++)
@@ -99,11 +96,11 @@ int main (int argc, char **argv)
         {
             for (x = 0; x < WINW; x += BAND)
             {
-                XSetForeground (d, gc, palette[cell_of (x, y)]);
-                XFillRectangle (d, win, gc, x, y, BAND, BAND);
+                bw_fill (win, palette[cell_of (x, y)], x, y, BAND, BAND);
             }
         }
-        XSync (d, False);
+        bw_present (win);
+        bw_sync ();
         usleep (500000);
 
         /*
@@ -111,7 +108,7 @@ int main (int argc, char **argv)
          * Sampling starts a few pixels in so the very edge is not what decides
          * the result.
          */
-        img = capture_region (d, root, 4, 4, WINW - OFFX - 40, WINH - OFFY - 40);
+        img = bw_capture (4, 4, WINW - OFFX - 40, WINH - OFFY - 40);
         if (img == NULL)
         {
             fprintf (stderr, "capture failed\n");
@@ -123,7 +120,7 @@ int main (int argc, char **argv)
             for (x = 0; x < 4; x++)
             {
                 int cx = (img->width / 5) * (x + 1);
-                int idx = colour_index (XGetPixel (img, cx, y));
+                int idx = colour_index (bw_pixel (img, cx, y));
 
                 /*
                  * No colour of the pattern at all, so this pixel is not ours:
@@ -146,7 +143,7 @@ int main (int argc, char **argv)
                 seen++;
             }
         }
-        XDestroyImage (img);
+        bw_image_free (img);
 
         if (wrong >= 0)
         {
@@ -166,8 +163,8 @@ int main (int argc, char **argv)
         }
     }
 
-    XDestroyWindow (d, win);
-    XCloseDisplay (d);
+    bw_destroy (win);
+    bw_close ();
 
     printf ("off-screen window: %d clean, %d wrong, %d proved nothing\n",
             ok, bad, blind);

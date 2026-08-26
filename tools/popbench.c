@@ -7,7 +7,8 @@
  * XRender only has to make a picture.
  *
  * A background window gives the compositor something to redraw underneath.
- * Override-redirect popups, the way real menus are, are mapped and unmapped in
+ * The popups are what real menus are - override-redirect windows on X11,
+ * xdg_popups of the background window on Wayland - mapped and unmapped in
  * turn at a fixed rate so every renderer is given identical work.
  *
  *   popbench <seconds> [cycles per second] [popups] [width] [height]
@@ -22,12 +23,9 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include <X11/Xatom.h>
 #include "gate.h"
 #include "now.h"
-#include "stage.h"
+#include "win.h"
 #include "place.h"
 
 #define MIN(a,b) (((a) < (b)) ? (a) : (b))
@@ -62,12 +60,7 @@ static void mark (const char *s)
 
 int main (int argc, char **argv)
 {
-    Display *d;
-    Window bg, *pop;
-    GC gc;
-    XSetWindowAttributes swa;
-    XSizeHints hints;
-    Atom wtype, normal;
+    bw_win *bg, **pop;
     double seconds = (argc > 1) ? atof (argv[1]) : 12.0;
     double rate = (argc > 2) ? atof (argv[2]) : 20.0;
 
@@ -76,7 +69,7 @@ int main (int argc, char **argv)
         rate = 20.0;
     }
     int npop = (argc > 3) ? atoi (argv[3]) : 6;
-    int scr, i, j, cycles = 0;
+    int i, j, cycles = 0;
     int bgw, bgh, bgx, bgy, maxx, maxy;
     long tasks, warm, done = 0;
     double mstart;
@@ -88,17 +81,15 @@ int main (int argc, char **argv)
         0xc04040, 0x40c040, 0x4040c0, 0xc0c040, 0xc040c0, 0x40c0c0
     };
 
-    d = XOpenDisplay (NULL);
-    if (d == NULL)
+    if (!bw_open ())
     {
         fprintf (stderr, "no display\n");
 
         return 2;
     }
-    scr = DefaultScreen (d);
 
     bgw = BGW; bgh = BGH;
-    bench_stage (d, 80, &bgx, &bgy, &bgw, &bgh);
+    bw_stage (80, &bgx, &bgy, &bgw, &bgh);
     bgw = MIN (BGW, bgw); bgh = MIN (BGH, bgh);
     /* How far along and down the popups may march before starting again */
     maxx = bgw - 200 - popw;
@@ -111,64 +102,64 @@ int main (int argc, char **argv)
     {
         maxy = 1;
     }
-    bg = XCreateSimpleWindow (d, RootWindow (d, scr), bgx, bgy, bgw, bgh, 0,
-                              BlackPixel (d, scr), BlackPixel (d, scr));
-    hints.flags = USPosition | USSize | PPosition | PSize;
-    hints.x = bgx; hints.y = bgy; hints.width = bgw; hints.height = bgh;
-    XSetWMNormalHints (d, bg, &hints);
-    wtype = XInternAtom (d, "_NET_WM_WINDOW_TYPE", False);
-    normal = XInternAtom (d, "_NET_WM_WINDOW_TYPE_NORMAL", False);
-    XChangeProperty (d, bg, wtype, XA_ATOM, 32, PropModeReplace,
-                     (unsigned char *) &normal, 1);
-    XStoreName (d, bg, "popbench background");
-    XMapWindow (d, bg);
-    gc = XCreateGC (d, bg, 0, NULL);
-    XSync (d, False);
+    bg = bw_create (NULL, bgx, bgy, bgw, bgh, "popbench background",
+                    BW_PLACED | BW_UNMANAGED);
+    if (bg == NULL)
+    {
+        fprintf (stderr, "no window\n");
+
+        return 2;
+    }
+    bw_map (bg);
+    bw_sync ();
     sleep (3);
 
     /*
      * Where the window really is, not where it was asked to be. The popups
-     * below are override redirect, so they land exactly where they are put:
-     * placed from the asked-for corner they open away from the window on any
-     * compositor that does its own placing, and then the thing being measured
-     * is the desktop being redrawn under a menu instead of this window.
+     * below open relative to it, so placed from the asked-for corner they
+     * open away from the window on any compositor that does its own placing,
+     * and then the thing being measured is the desktop being redrawn under a
+     * menu instead of this window.
      */
-    bench_placed (d, bg, bgx, bgy, "popbench background");
-    bench_where (d, bg, &bgx, &bgy, NULL, NULL);
+    bench_placed (bg, bgx, bgy, "popbench background");
+    bw_where (bg, &bgx, &bgy, NULL, NULL);
 
     for (i = 0; i < 300; i++)
     {
-        XSetForeground (d, gc, colours[i % 6]);
-        XFillRectangle (d, bg, gc, (i * 41) % (bgw - 80), (i * 67) % (bgh - 60),
-                        80, 60);
+        bw_fill (bg, colours[i % 6], (i * 41) % (bgw - 80), (i * 67) % (bgh - 60),
+                 80, 60);
     }
-    XSync (d, False);
+    bw_present (bg);
+    bw_sync ();
 
-    /* Override redirect, the way a menu really is: no frame, no manager */
+    /* What a menu really is: no frame, no manager, belongs to the window */
     if (npop < 1)
     {
         fprintf (stderr, "popups must be at least 1\n");
 
         return 2;
     }
-    pop = calloc (npop, sizeof (Window));
+    pop = calloc (npop, sizeof (bw_win *));
     if (pop == NULL)
     {
         fprintf (stderr, "out of memory\n");
 
         return 2;
     }
-    swa.override_redirect = True;
     for (i = 0; i < npop; i++)
     {
         /* Inside the stage, and inside the background window with it */
-        pop[i] = XCreateWindow (d, RootWindow (d, scr),
-                                bgx + 100 + (i * (popw + 30)) % maxx,
-                                bgy + 100 + ((i % 3) * (poph + 40)) % maxy,
-                                popw, poph, 0, CopyFromParent, InputOutput,
-                                CopyFromParent, CWOverrideRedirect, &swa);
+        pop[i] = bw_create (bg, bgx + 100 + (i * (popw + 30)) % maxx,
+                            bgy + 100 + ((i % 3) * (poph + 40)) % maxy,
+                            popw, poph, NULL, BW_POPUP);
+        if (pop[i] == NULL)
+        {
+            fprintf (stderr, "no popup window\n");
+
+            return 2;
+        }
     }
-    XSync (d, False);
+    bw_sync ();
 
     tasks = bench_tasks ();
     warm = (tasks > 0) ? 10 : 0;
@@ -177,15 +168,16 @@ int main (int argc, char **argv)
     for (i = 0; ; i++)
     {
         double due = start + i / rate;
-        Window w = pop[i % npop];
+        bw_win *w = pop[i % npop];
 
-        XMapRaised (d, w);
+        bw_map (w);
+        bw_raise (w);
         for (j = 0; j < 10; j++)
         {
-            XSetForeground (d, gc, colours[(i + j) % 6]);
-            XFillRectangle (d, w, gc, 10, 10 + j * 42, popw - 20, 36);
+            bw_fill (w, colours[(i + j) % 6], 10, 10 + j * 42, popw - 20, 36);
         }
-        XSync (d, False);
+        bw_present (w);
+        bw_sync ();
         /*
          * At least one refresh period, so every popup is presented whatever
          * the phase. Shorter than a frame, and the 50 ms cycle - an exact
@@ -194,8 +186,8 @@ int main (int argc, char **argv)
          * where that point happened to fall.
          */
         usleep (25000);
-        XUnmapWindow (d, w);
-        XSync (d, False);
+        bw_unmap (w);
+        bw_sync ();
         cycles++;
 
         if (tasks > 0)
@@ -227,10 +219,7 @@ int main (int argc, char **argv)
             break;
         }
 
-        while (bench_now () < due)
-        {
-            usleep (200);
-        }
+        bench_wait_until (due);
     }
 
     if (tasks > 0)
@@ -247,10 +236,10 @@ int main (int argc, char **argv)
 
     for (i = 0; i < npop; i++)
     {
-        XDestroyWindow (d, pop[i]);
+        bw_destroy (pop[i]);
     }
-    XDestroyWindow (d, bg);
-    XCloseDisplay (d);
+    bw_destroy (bg);
+    bw_close ();
     free (pop);
 
     return 0;

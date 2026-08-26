@@ -18,10 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include "capture.h"
-#include <X11/Xatom.h>
+#include "win.h"
 
 #define BAND    40
 #define NCOL     8
@@ -55,13 +52,13 @@ static int colour_index (unsigned long pixel)
 }
 
 /* How many sampled points look like the pattern they should be */
-static int pattern_score (Display *d, Window root, int ox, int oy, int *total)
+static int pattern_score (int ox, int oy, int *total)
 {
-    XImage *img;
+    bw_image *img;
     int x, y, hit = 0, n = 0;
 
-    img = capture_region (d, root, ox + MARGIN, oy + MARGIN,
-                     WINW - 2 * MARGIN, WINH - 2 * MARGIN);
+    img = bw_capture (ox + MARGIN, oy + MARGIN,
+                      WINW - 2 * MARGIN, WINH - 2 * MARGIN);
     if (img == NULL)
     {
         *total = 0;
@@ -75,13 +72,13 @@ static int pattern_score (Display *d, Window root, int ox, int oy, int *total)
             int cx = (img->width / 5) * (x + 1);
 
             n++;
-            if (colour_index (XGetPixel (img, cx, y)) == band_of (y + MARGIN))
+            if (colour_index (bw_pixel (img, cx, y)) == band_of (y + MARGIN))
             {
                 hit++;
             }
         }
     }
-    XDestroyImage (img);
+    bw_image_free (img);
     *total = n;
 
     return hit;
@@ -89,41 +86,42 @@ static int pattern_score (Display *d, Window root, int ox, int oy, int *total)
 
 int main (int argc, char **argv)
 {
-    Display *d;
-    Window root, win, child;
-    GC gc;
-    XSizeHints hints;
-    Atom wtype, normal;
-    int scr, rounds = (argc > 1) ? atoi (argv[1]) : 3;
+    bw_win *win;
+    int rounds = (argc > 1) ? atoi (argv[1]) : 3;
     int r, y, ox, oy, ok = 0, bad = 0, inconclusive = 0, nocapture = 0;
 
-    d = XOpenDisplay (NULL);
-    if (d == NULL)
+    if (!bw_open ())
     {
         fprintf (stderr, "no display\n");
 
         return 2;
     }
-    scr = DefaultScreen (d);
-    root = RootWindow (d, scr);
 
-    win = XCreateSimpleWindow (d, root, 150, 150, WINW, WINH, 0,
-                               BlackPixel (d, scr), BlackPixel (d, scr));
-    hints.flags = USPosition | USSize | PPosition | PSize;
-    hints.x = 150; hints.y = 150; hints.width = WINW; hints.height = WINH;
-    XSetWMNormalHints (d, win, &hints);
-    wtype = XInternAtom (d, "_NET_WM_WINDOW_TYPE", False);
-    normal = XInternAtom (d, "_NET_WM_WINDOW_TYPE_NORMAL", False);
-    XChangeProperty (d, win, wtype, XA_ATOM, 32, PropModeReplace,
-                     (unsigned char *) &normal, 1);
-    XStoreName (d, win, "iconify_check");
-    XSelectInput (d, win, StructureNotifyMask);
-    XMapWindow (d, win);
-    gc = XCreateGC (d, win, 0, NULL);
-    XSync (d, False);
+    if (bw_is_wayland ())
+    {
+        /* Fullscreen, so the origin is known without asking anyone */
+        win = bw_create (NULL, 0, 0, WINW, WINH, "iconify_check", BW_NOTIFY);
+        if (win != NULL)
+        {
+            bw_fullscreen (win, 1);
+        }
+    }
+    else
+    {
+        win = bw_create (NULL, 150, 150, WINW, WINH, "iconify_check",
+                         BW_PLACED | BW_NOTIFY);
+    }
+    if (win == NULL)
+    {
+        fprintf (stderr, "no window\n");
+
+        return 2;
+    }
+    bw_map (win);
+    bw_sync ();
     sleep (3);
 
-    XTranslateCoordinates (d, win, root, 0, 0, &ox, &oy, &child);
+    bw_where (win, &ox, &oy, NULL, NULL);
 
     for (r = 0; r < rounds; r++)
     {
@@ -131,13 +129,13 @@ int main (int argc, char **argv)
 
         for (y = 0; y < WINH; y += BAND)
         {
-            XSetForeground (d, gc, palette[band_of (y)]);
-            XFillRectangle (d, win, gc, 0, y, WINW, BAND);
+            bw_fill (win, palette[band_of (y)], 0, y, WINW, BAND);
         }
-        XSync (d, False);
+        bw_present (win);
+        bw_sync ();
         usleep (500000);
 
-        hit = pattern_score (d, root, ox, oy, &total);
+        hit = pattern_score (ox, oy, &total);
         /* A total of zero is no photograph at all, which says nothing about
            the pattern and has to be kept apart from a pattern that is wrong */
         if (total == 0)
@@ -156,18 +154,18 @@ int main (int argc, char **argv)
         }
 
         /* Minimise */
-        XIconifyWindow (d, win, scr);
-        XSync (d, False);
+        bw_minimize (win);
+        bw_sync ();
         usleep (900000);
 
-        gone_hit = pattern_score (d, root, ox, oy, &gone_total);
+        gone_hit = pattern_score (ox, oy, &gone_total);
         if (gone_total == 0)
         {
             printf ("round %d: the screen cannot be photographed after "
                     "minimising\n", r + 1);
             nocapture++;
-            XMapWindow (d, win);
-            XSync (d, False);
+            bw_restore (win);
+            bw_sync ();
             usleep (700000);
             continue;
         }
@@ -177,27 +175,27 @@ int main (int argc, char **argv)
                     "minimise did not happen and this proves nothing\n", r + 1);
             inconclusive++;
             /* Put it back anyway before the next round */
-            XMapWindow (d, win);
-            XSync (d, False);
+            bw_restore (win);
+            bw_sync ();
             usleep (700000);
             continue;
         }
 
-        /* Restore, then redraw: unmapped windows are not kept by the server */
-        XMapWindow (d, win);
-        XSync (d, False);
+        /* Restore, then redraw: unmapped windows are not kept for us */
+        bw_restore (win);
+        bw_sync ();
         usleep (900000);
         for (y = 0; y < WINH; y += BAND)
         {
-            XSetForeground (d, gc, palette[band_of (y)]);
-            XFillRectangle (d, win, gc, 0, y, WINW, BAND);
+            bw_fill (win, palette[band_of (y)], 0, y, WINW, BAND);
         }
-        XSync (d, False);
+        bw_present (win);
+        bw_sync ();
         usleep (700000);
 
         /* The manager may have put it somewhere else on restoring */
-        XTranslateCoordinates (d, win, root, 0, 0, &ox, &oy, &child);
-        hit = pattern_score (d, root, ox, oy, &total);
+        bw_where (win, &ox, &oy, NULL, NULL);
+        hit = pattern_score (ox, oy, &total);
 
         if (total == 0)
         {
@@ -209,6 +207,21 @@ int main (int argc, char **argv)
         {
             ok++;
         }
+        else if (bw_is_wayland () && !(bw_state (win) & BW_STATE_ACTIVE) &&
+                 hit * gone_total <= gone_hit * total)
+        {
+            /*
+             * The window never came back: it is no more on screen than it was
+             * while minimised, and the compositor did not activate it either.
+             * The state alone is not enough to say so - a compositor may
+             * unminimise without handing over the focus, and then a genuinely
+             * corrupted restore would be excused here as a refusal and the
+             * check would stop catching the defect it exists for.
+             */
+            printf ("round %d: the restore was refused, so nothing can be "
+                    "concluded\n", r + 1);
+            inconclusive++;
+        }
         else
         {
             bad++;
@@ -217,8 +230,8 @@ int main (int argc, char **argv)
         }
     }
 
-    XDestroyWindow (d, win);
-    XCloseDisplay (d);
+    bw_destroy (win);
+    bw_close ();
 
     printf ("minimise and restore: %d clean, %d wrong, %d proved nothing\n",
             ok, bad, inconclusive);

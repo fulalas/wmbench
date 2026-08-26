@@ -8,9 +8,9 @@
  * area a popup covered has to be repainted from the window underneath when it
  * unmaps, and nothing here has ever checked that it is.
  *
- * A known band pattern sits in a window. Override-redirect popups, the way
- * real menus are, are mapped over it and unmapped again, many times. Then the
- * pattern window is captured and must still be exactly the pattern.
+ * A known band pattern sits in a window. Popups, the way real menus are, are
+ * mapped over it and unmapped again, many times. Then the pattern window is
+ * captured and must still be exactly the pattern.
  *
  *   pop_check [rounds]
  *
@@ -19,9 +19,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include "capture.h"
+#include "win.h"
+#include "place.h"
 
 #define BAND    40
 #define NCOL    8
@@ -58,36 +57,30 @@ static int colour_index (unsigned long pixel)
 
 int main (int argc, char **argv)
 {
-    Display *d;
-    Window root, win, pop[3];
-    GC gc;
-    Pixmap pat;
-    XImage *img;
-    XSizeHints hints;
-    XSetWindowAttributes swa;
-    XWindowAttributes wa;
-    int scr, rounds = (argc > 1) ? atoi (argv[1]) : 3;
-    int r, i, j, x, y, ox, oy, capw, caph, ok = 0, bad = 0;
-    Window child;
+    bw_win *win, *pop[3], *pat;
+    bw_image *img;
+    int rounds = (argc > 1) ? atoi (argv[1]) : 3;
+    int r, i, j, x, y, ox, oy, capw, caph, gw, gh, ok = 0, bad = 0;
 
-    d = XOpenDisplay (NULL);
-    if (d == NULL)
+    if (!bw_open ())
     {
         fprintf (stderr, "no display\n");
 
         return 2;
     }
-    scr = DefaultScreen (d);
-    root = RootWindow (d, scr);
 
-    win = XCreateSimpleWindow (d, root, 120, 120, WINW, WINH, 0,
-                               BlackPixel (d, scr), BlackPixel (d, scr));
-    hints.flags = USPosition | USSize | PPosition | PSize;
-    hints.x = 120; hints.y = 120; hints.width = WINW; hints.height = WINH;
-    XSetWMNormalHints (d, win, &hints);
-    XStoreName (d, win, "pop_check pattern");
-    XMapWindow (d, win);
-    gc = XCreateGC (d, win, 0, NULL);
+    win = bw_create (NULL, 120, 120, WINW, WINH, "pop_check pattern",
+                     BW_PLACED | BW_AIMED | BW_UNMANAGED);
+    if (win == NULL)
+    {
+        fprintf (stderr, "no window\n");
+
+        return 2;
+    }
+    if (!bench_aimable (win))
+    {
+        return 3;
+    }
 
     /*
      * The pattern is the window's background as well as what is drawn into it.
@@ -99,32 +92,31 @@ int main (int argc, char **argv)
      * from the pattern the strip is right either way, and what is measured is
      * the compositor rather than the absence of one.
      */
-    pat = XCreatePixmap (d, win, WINW, WINH, (unsigned) DefaultDepth (d, scr));
-    for (y = 0; y < WINH; y += BAND)
+    pat = bw_canvas (WINW, WINH);
+    if (pat == NULL)
     {
-        XSetForeground (d, gc, palette[(y / BAND) % NCOL]);
-        XFillRectangle (d, pat, gc, 0, y, WINW, BAND);
-    }
-    XSetWindowBackgroundPixmap (d, win, pat);
-    XSync (d, False);
-    sleep (3);
-
-    XTranslateCoordinates (d, win, root, 0, 0, &ox, &oy, &child);
-    /*
-     * And the size it really has. Only USSize was asked for and a manager is
-     * free to ignore it - a tiling one sizes the window to its tile - so
-     * photographing the size that was asked for would take in the desktop
-     * beside the window and read every one of those pixels as something a
-     * popup left behind.
-     */
-    if (!XGetWindowAttributes (d, win, &wa))
-    {
-        fprintf (stderr, "the window is gone\n");
+        fprintf (stderr, "out of memory\n");
 
         return 2;
     }
-    capw = (wa.width < WINW) ? wa.width : WINW;
-    caph = (wa.height < WINH) ? wa.height : WINH;
+    for (y = 0; y < WINH; y += BAND)
+    {
+        bw_fill (pat, palette[(y / BAND) % NCOL], 0, y, WINW, BAND);
+    }
+    bw_set_background (win, pat);
+    bw_map (win);
+    bw_sync ();
+    sleep (3);
+
+    bw_where (win, &ox, &oy, &gw, &gh);
+    /*
+     * And the size it really has. A manager is free to hand out a size of its
+     * own - a tiling one sizes the window to its tile - so photographing the
+     * size that was asked for would take in the desktop beside the window and
+     * read every one of those pixels as something a popup left behind.
+     */
+    capw = (gw < WINW) ? gw : WINW;
+    caph = (gh < WINH) ? gh : WINH;
     if (capw <= 2 * MARGIN || caph <= 2 * MARGIN)
     {
         fprintf (stderr, "the window is too small to photograph\n");
@@ -133,43 +125,50 @@ int main (int argc, char **argv)
     }
 
     /* Popups land on top of the pattern, which is the whole point */
-    swa.override_redirect = True;
     for (i = 0; i < 3; i++)
     {
-        pop[i] = XCreateWindow (d, root, ox + 60 + i * 200, oy + 80 + i * 90,
-                                POPW, POPH, 0, CopyFromParent, InputOutput,
-                                CopyFromParent, CWOverrideRedirect, &swa);
+        pop[i] = bw_create (win, ox + 60 + i * 200, oy + 80 + i * 90,
+                            POPW, POPH, NULL, BW_POPUP);
+        if (pop[i] == NULL)
+        {
+            fprintf (stderr, "no popup window\n");
+
+            return 2;
+        }
     }
-    XSync (d, False);
+    bw_sync ();
 
     for (r = 0; r < rounds; r++)
     {
         /* Draw the pattern, then cover and uncover it repeatedly */
-        XCopyArea (d, pat, win, gc, 0, 0, WINW, WINH, 0, 0);
-        XSync (d, False);
+        bw_copy (pat, win, 0, 0, WINW, WINH, 0, 0);
+        bw_present (win);
+        bw_sync ();
         usleep (200000);
 
         for (i = 0; i < 24; i++)
         {
-            Window w = pop[i % 3];
+            bw_win *w = pop[i % 3];
 
-            XMapRaised (d, w);
+            bw_map (w);
+            bw_raise (w);
             for (j = 0; j < 6; j++)
             {
-                XSetForeground (d, gc, palette[(i + j) % NCOL]);
-                XFillRectangle (d, w, gc, 8, 8 + j * 46, POPW - 16, 40);
+                bw_fill (w, palette[(i + j) % NCOL], 8, 8 + j * 46,
+                         POPW - 16, 40);
             }
-            XSync (d, False);
+            bw_present (w);
+            bw_sync ();
             usleep (25000);
-            XUnmapWindow (d, w);
-            XSync (d, False);
+            bw_unmap (w);
+            bw_sync ();
             usleep (25000);
         }
 
         /* Everything is unmapped again; the pattern must be untouched */
         usleep (500000);
-        img = capture_region (d, root, ox + MARGIN, oy + MARGIN,
-                         capw - 2 * MARGIN, caph - 2 * MARGIN);
+        img = bw_capture (ox + MARGIN, oy + MARGIN,
+                          capw - 2 * MARGIN, caph - 2 * MARGIN);
         if (img == NULL)
         {
             fprintf (stderr, "capture failed\n");
@@ -186,7 +185,7 @@ int main (int argc, char **argv)
                 {
                     int px = (img->width / 6) * (x + 1);
 
-                    if (colour_index (XGetPixel (img, px, y)) !=
+                    if (colour_index (bw_pixel (img, px, y)) !=
                         band_of (y + MARGIN, 0))
                     {
                         wrong = y;
@@ -205,16 +204,16 @@ int main (int argc, char **argv)
                         r + 1, wrong);
             }
         }
-        XDestroyImage (img);
+        bw_image_free (img);
     }
 
     for (i = 0; i < 3; i++)
     {
-        XDestroyWindow (d, pop[i]);
+        bw_destroy (pop[i]);
     }
-    XFreePixmap (d, pat);
-    XDestroyWindow (d, win);
-    XCloseDisplay (d);
+    bw_destroy (pat);
+    bw_destroy (win);
+    bw_close ();
 
     printf ("popups: %d rounds clean, %d left something behind\n", ok, bad);
 

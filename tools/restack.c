@@ -15,12 +15,91 @@
  * for why raising the frame the window manager put around it does nothing.
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <X11/Xlib.h>
+#include "win.h"
 
 static Display *d;
 static Window root;
+
+/*
+ * The Wayland answer. Only a compositor that lists foreign toplevels can be
+ * asked about other programs' windows at all, and even that list carries no
+ * stacking order, so -c can never verify one here; the stress mix on Wayland
+ * relies on open order and the WINDOW-UP marker instead of this program.
+ */
+static int wayland_main (int argc, char **argv)
+{
+    int i, first = 1, wait_only = 0, check_only = 0, never = 0, total = 0;
+
+    if (argc > 1 && strcmp (argv[1], "-w") == 0)
+    {
+        first = 2;
+    }
+    if (argc > 1 && strcmp (argv[1], "-wait") == 0)
+    {
+        wait_only = 1;
+        first = 2;
+    }
+    if (argc > 1 && strcmp (argv[1], "-c") == 0)
+    {
+        check_only = 1;
+        first = 2;
+    }
+    if (!bw_foreign_available ())
+    {
+        printf ("restack: this session does not list other windows\n");
+        fflush (stdout);
+
+        return 3;
+    }
+    if (first == 2 && !check_only)
+    {
+        for (i = first; i < argc; i++)
+        {
+            int waited;
+
+            for (waited = 0; waited < 300; waited++)   /* up to 30 seconds */
+            {
+                if (bw_foreign_exists (argv[i]))
+                {
+                    break;
+                }
+                usleep (100000);
+            }
+            if (waited >= 300)
+            {
+                printf ("restack: waited in vain for \"%s\"\n", argv[i]);
+                never = 1;
+            }
+        }
+    }
+    if (wait_only)
+    {
+        return never ? 3 : 0;
+    }
+    if (!check_only)
+    {
+        for (i = first; i < argc; i++)
+        {
+            int n = bw_foreign_activate (argv[i]);
+
+            if (n == 0)
+            {
+                printf ("restack: nothing named \"%s\"\n", argv[i]);
+            }
+            total += n;
+            usleep (40000);
+        }
+        printf ("restack: %d windows placed\n", total);
+    }
+    printf ("stack: cannot be verified on this session\n");
+    fflush (stdout);
+
+    return 3;
+}
 
 /*
  * The tree is walked on a live desktop: a menu, a tooltip or a benchmark
@@ -244,6 +323,17 @@ int main (int argc, char **argv)
 {
     int i, total = 0, first = 1, wait_first = 0, wait_only = 0,
         check_only = 0, never = 0;
+    if (!bw_open ())
+    {
+        fprintf (stderr, "no display\n");
+
+        return 2;
+    }
+    if (bw_is_wayland ())
+    {
+        return wayland_main (argc, argv);
+    }
+    bw_close ();
 
     d = XOpenDisplay (NULL);
     if (d == NULL)

@@ -93,6 +93,7 @@ tee_report "$OUT"
 # something that leads it instead, kill -- -$$ takes that down too
 on_int () {
     trap - INT TERM
+    let_sleep
     if [ "$(ps -o pgid= -p $$ | tr -d ' ')" = "$$" ]; then
         kill -- -$$ 2>/dev/null
     else
@@ -101,6 +102,9 @@ on_int () {
     exit 130
 }
 trap on_int INT TERM
+# and put the screen's own settings back however this run ends
+trap let_sleep EXIT
+keep_awake
 
 echo "system:     $(hostname) ($(. /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-unknown}"))"
 echo "kernel:     $(uname -r)"
@@ -120,6 +124,17 @@ echo "compositor: $WM_NAME $(wm_version) (compositing $COMPOSITING)"
     echo "            left empty rather than filled with zeros"
 [ "$POWER_OK" = 1 ] && echo "power:      $POWER_DESC" \
                      || echo "power:      no sensor, not reported"
+# The moving loads prove their windows really moved with one screenshot before
+# and one after the measurement; without a tool they run on the protocol's
+# word, and say so themselves in their logs
+if [ "$ST" = wayland ]; then
+    if CAP=$(pick_capture_cmd); then
+        export BENCH_CAPTURE_CMD=$CAP
+    else
+        echo "captures:   no screenshot tool (grim), so the moves the loads"
+        echo "            report are taken on the protocol's word, unproven"
+    fi
+fi
 echo
 EST=0
 for t in $TESTS; do
@@ -178,7 +193,11 @@ measure () {
     pid=$!
 
     while ! grep -q MEASURE-START "$log" 2>/dev/null; do
-        kill -0 "$pid" 2>/dev/null || { wait "$pid"; return 1; }
+        # A load can refuse before the measurement even starts - a Wayland
+        # session with nothing to ask for - and 3 means refused, not broken
+        kill -0 "$pid" 2>/dev/null || { wait "$pid"
+                                        [ "$?" = 3 ] && return 3
+                                        return 1; }
         sleep 0.1
     done
     t0=$(now_s); c0=$(comp_cpu); power_begin

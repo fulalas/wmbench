@@ -436,6 +436,51 @@ end_report () {
     done
 }
 
+# Keep the screen awake for the length of a run, and put the settings back
+# exactly as they were afterwards - including when the run is interrupted.
+#
+# A screen that blanks mid-run leaves the compositor drawing nothing, so the
+# rows after it are not measurements of anything. On Wayland each benchmark
+# window inhibits idling through the idle-inhibit protocol, which needs no
+# help here; X11 has the screensaver and DPMS, which are settings and have to
+# be saved and restored.
+AWAKE_SAVED=""
+keep_awake () {
+    local q
+
+    command -v xset >/dev/null 2>&1 || return 0
+    [ -n "${DISPLAY:-}" ] || return 0
+    q=$(xset q 2>/dev/null) || return 0
+    # timeout cycle | standby suspend off | whether DPMS was on at all
+    AWAKE_SAVED=$(echo "$q" | awk '
+        /timeout:/  { t = $2; c = $4 }
+        /Standby:/  { sb = $2; su = $4; of = $6 }
+        /DPMS is/   { on = ($3 == "Enabled") ? 1 : 0 }
+        END { if (t != "") printf "%s %s %s %s %s %s", t, c, sb, su, of, on }')
+    xset s off 2>/dev/null
+    xset -dpms 2>/dev/null
+}
+
+let_sleep () {
+    local t c sb su of on
+
+    [ -n "$AWAKE_SAVED" ] || return 0
+    read -r t c sb su of on <<< "$AWAKE_SAVED"
+    AWAKE_SAVED=""
+    xset s "$t" "$c" 2>/dev/null
+    [ -n "$sb" ] && xset dpms "$sb" "$su" "$of" 2>/dev/null
+    # Enabling DPMS on a screen that had it off would be a setting we invented.
+    # Spelled out rather than "&& ... || ...": there the second arm also runs
+    # when the first one fails, which under XWayland it does, and the screen
+    # would be left with DPMS off after having had it on.
+    if [ "$on" = 1 ]; then
+        xset +dpms 2>/dev/null
+    else
+        xset -dpms 2>/dev/null
+    fi
+    return 0
+}
+
 # x11 or wayland. XDG_SESSION_TYPE lies less than it used to, but a live
 # Wayland socket is the fact of the matter.
 session_type () {
@@ -587,6 +632,20 @@ STRESS_FRAMES=${RENDER_FRAMES:-1200}    # 20 s of frames at 60 a second
 STRESS_STACK=("fsbench" "popbench background" "transbench background"
               "manywin" "movebench resize" "movebench" "transbench translucent")
 
+# On Wayland nothing can ask about another program's windows, so a window is
+# waited for through the load's own log instead: every tool prints a
+# "WINDOW-UP <name>" marker after its first commit. Stack order is open order
+# there, which is what the mix is built on anyway.
+stress_wait_up () {             # $1 marker, $2 log
+    local i
+    for i in $(seq 300); do     # up to 30 seconds, like restack -wait
+        grep -q "$1" "$2" 2>/dev/null && return 0
+        sleep 0.1
+    done
+    echo "never saw $1" >> "$2"
+    return 1
+}
+
 # Start the whole mix held at gate $1, logs named "$2-<load>.log". Fills
 # STRESS_NAMES, STRESS_LOGS and STRESS_PIDS, in step with each other, and
 # STRESS_SCENERY_PID with the filler windows, which count nothing and are
@@ -602,6 +661,10 @@ stress_start () {
     STRESS_GATE=$1; STRESS_PRE=$2
     STRESS_NAMES=(); STRESS_LOGS=(); STRESS_PIDS=(); STRESS_LATE=0
     local r=$STRESS_FRAMES
+    # On Wayland the translucent window maps itself only when the gate opens,
+    # so it lands on top; what says the load is up there is its background
+    local tw="transbench translucent"
+    [ "$(session_type)" = wayland ] && tw="transbench background"
 
     stress_load render "$r"             "fsbench" \
         ./tools/fsbench2 0 windowed 60
@@ -610,11 +673,16 @@ stress_start () {
     # transbench opens a background window and a translucent one over it. One
     # program owns both, so opening cannot separate them: its background lands
     # here, and the translucent one is put back on top below.
-    stress_load trans  "$r"             "transbench translucent" \
+    stress_load trans  "$r"             "$tw" \
         ./tools/transbench 0 0.75 60
     ./tools/manywin 12 > "$STRESS_PRE-many.log" 2>&1 &
     STRESS_SCENERY_PID=$!
-    ./tools/restack -wait "manywin" || STRESS_LATE=1
+    if [ "$(session_type)" = wayland ]; then
+        # READY comes after every one of its windows is up
+        stress_wait_up "^READY " "$STRESS_PRE-many.log" || STRESS_LATE=1
+    else
+        ./tools/restack -wait "manywin" || STRESS_LATE=1
+    fi
     stress_load resize $((2 * r))       "movebench resize" \
         ./tools/movebench 0 resize 120
     stress_load move   $((2 * r))       "movebench" \
@@ -630,6 +698,12 @@ stress_start () {
 # that will not simply stack them as they open. Better a scene put right by
 # asking than no row at all.
 stress_settle () {
+    if [ "$(session_type)" = wayland ]; then
+        # The translucent window maps itself at the gate, so it lands on top;
+        # nothing can read the order back to prove the rest
+        echo "stack: open order, verification not possible on wayland"
+        return 0
+    fi
     ./tools/restack -w "transbench translucent" > "$STRESS_PRE-restack.log" 2>&1
     ./tools/restack -c "${STRESS_STACK[@]}" >> "$STRESS_PRE-restack.log" 2>&1 &&
         return 0
@@ -646,7 +720,11 @@ stress_load () {                # $1 name, $2 tasks, $3 window, $4... program
     # On screen before the next one is opened, or they race for the order. A
     # window that never appears is not a stacking question, it is a broken
     # load, and the caller is told rather than left to guess later.
-    ./tools/restack -wait "$win" >> "$log" 2>&1 || STRESS_LATE=1
+    if [ "$(session_type)" = wayland ]; then
+        stress_wait_up "^WINDOW-UP $win\$" "$log" || STRESS_LATE=1
+    else
+        ./tools/restack -wait "$win" >> "$log" 2>&1 || STRESS_LATE=1
+    fi
 }
 
 # Wait until every load is set up and waiting at the gate. A program still

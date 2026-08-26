@@ -6,8 +6,9 @@
  * compositor cannot just copy: it has to read what is underneath and blend.
  *
  * A detailed opaque window sits underneath. A second window on top carries
- * _NET_WM_WINDOW_OPACITY and redraws at a fixed rate, so every step forces the
- * compositor to repaint the background there and blend the top window over it.
+ * the opacity - _NET_WM_WINDOW_OPACITY on X11, wp-alpha-modifier on Wayland -
+ * and redraws at a fixed rate, so every step forces the compositor to repaint
+ * the background there and blend the top window over it.
  *
  *   transbench <seconds> [opacity 0..1] [steps per second]
  */
@@ -16,13 +17,9 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include <X11/Xatom.h>
-#include "polite.h"
 #include "gate.h"
 #include "now.h"
-#include "stage.h"
+#include "win.h"
 #include "place.h"
 
 #define MIN(a,b) (((a) < (b)) ? (a) : (b))
@@ -44,53 +41,24 @@ static long bench_tasks (void)
     return (e != NULL && *e != '\0') ? atol (e) : 0;
 }
 
+/*
+ * The gate is not folded into mark() here, the way the other loads have it:
+ * on Wayland the translucent window is mapped between the two, so they have
+ * to be called separately. See the MEASURE-START site below.
+ */
 static void mark (const char *s)
 {
-    if (strcmp (s, "MEASURE-START") == 0)
-    {
-        /* In a mix of programs, wait until the whole load is up. See gate.c */
-        bench_wait_go ();
-    }
     printf ("%s\n", s);
     fflush (stdout);
 }
 
-static Window make_window (Display *d, int scr, int x, int y, int w, int h,
-                           const char *name)
-{
-    Window win;
-    XSizeHints hints;
-    Atom wtype, normal;
-
-    win = XCreateSimpleWindow (d, RootWindow (d, scr), x, y, w, h, 0,
-                               BlackPixel (d, scr), BlackPixel (d, scr));
-    XStoreName (d, win, name);
-
-    hints.flags = USPosition | USSize | PPosition | PSize;
-    hints.x = x; hints.y = y;
-    hints.width = w; hints.height = h;
-    XSetWMNormalHints (d, win, &hints);
-
-    wtype = XInternAtom (d, "_NET_WM_WINDOW_TYPE", False);
-    normal = XInternAtom (d, "_NET_WM_WINDOW_TYPE_NORMAL", False);
-    XChangeProperty (d, win, wtype, XA_ATOM, 32, PropModeReplace,
-                     (unsigned char *) &normal, 1);
-
-    return win;
-}
-
 int main (int argc, char **argv)
 {
-    Display *d;
-    Window bg, fg;
-    GC gc;
-    Atom opacity_atom;
-    unsigned long opacity;
+    bw_win *bg, *fg;
     double seconds = (argc > 1) ? atof (argv[1]) : 12.0;
     double alpha = (argc > 2) ? atof (argv[2]) : 0.75;
     double rate = (argc > 3) ? atof (argv[3]) : 120.0;
 
-    /* A 32-bit CARDINAL: out of range it would wrap rather than saturate */
     if (alpha < 0.0)
     {
         alpha = 0.0;
@@ -103,76 +71,120 @@ int main (int argc, char **argv)
     {
         rate = 120.0;
     }
-    int scr, i, steps = 0;
-    int bgw, bgh, fgw, fgh, sx, sy;
+    int i, steps = 0;
+    int bgw, bgh, fgw, fgh, sx, sy, fg_up = 0;
     long tasks, warm, done = 0;
     double start, mstart;
     unsigned long colours[6] = {
         0xc04040, 0x40c040, 0x4040c0, 0xc0c040, 0xc040c0, 0x40c0c0
     };
 
-    d = XOpenDisplay (NULL);
-    if (d == NULL)
+    if (!bw_open ())
     {
         fprintf (stderr, "no display\n");
 
         return 2;
     }
-    scr = DefaultScreen (d);
 
-    bench_stage (d, 60, &sx, &sy, &bgw, &bgh);
+    bw_stage (60, &sx, &sy, &bgw, &bgh);
     bgw = MIN (BGW, bgw); bgh = MIN (BGH, bgh);
     fgw = MIN (FGW, bgw - 220); fgh = MIN (FGH, bgh - 220);
-    bg = make_window (d, scr, sx, sy, bgw, bgh, "transbench background");
-    fg = make_window (d, scr, sx + 220, sy + 220, fgw, fgh,
-                      "transbench translucent");
+    bg = bw_create (NULL, sx, sy, bgw, bgh, "transbench background",
+                    BW_PLACED | BW_UNMANAGED);
+    fg = bw_create (NULL, sx + 220, sy + 220, fgw, fgh,
+                    "transbench translucent", BW_PLACED | BW_UNMANAGED);
+    if (bg == NULL || fg == NULL)
+    {
+        fprintf (stderr, "no window\n");
 
-    /* The window manager reads this and tells the compositor to blend */
-    opacity_atom = XInternAtom (d, "_NET_WM_WINDOW_OPACITY", False);
-    opacity = (unsigned long) (alpha * 0xffffffffUL);
-    XChangeProperty (d, fg, opacity_atom, XA_CARDINAL, 32, PropModeReplace,
-                     (unsigned char *) &opacity, 1);
+        return 2;
+    }
 
-    XMapWindow (d, bg);
-    XMapWindow (d, fg);
-    gc = XCreateGC (d, bg, 0, NULL);
-    XSync (d, False);
+    if (!bw_opacity (fg, alpha))
+    {
+        /* Without the protocol the window would simply be opaque, and the
+           number would read as a result for blending that never happened */
+        printf ("TRANS-REFUSED this session does not set window opacity\n");
+        fflush (stdout);
+
+        return 3;
+    }
+
+    bw_map (bg);
+    if (!bw_is_wayland ())
+    {
+        /* Mapped now and raised politely below, the X11 way */
+        bw_map (fg);
+        fg_up = 1;
+    }
+    bw_sync ();
     sleep (3);
-    XRaiseWindow (d, fg);
-    /* Politely, or GNOME posts a notification instead of raising */
-    polite_activate (d, RootWindow (d, scr), fg);
-    XSync (d, False);
-    sleep (1);
-    bench_placed (d, bg, sx, sy, "transbench background");
-    bench_placed (d, fg, sx + 220, sy + 220, "transbench translucent");
+    if (fg_up)
+    {
+        bw_raise (fg);
+        /* Politely, or GNOME posts a notification instead of raising */
+        bw_activate (fg);
+        bw_sync ();
+        sleep (1);
+    }
+    bench_placed (bg, sx, sy, "transbench background");
+    bench_placed (fg, sx + 220, sy + 220, "transbench translucent");
 
     /* Detail underneath, so the blend has something to read */
     for (i = 0; i < 400; i++)
     {
-        XSetForeground (d, gc, colours[i % 6]);
-        XFillRectangle (d, bg, gc, (i * 37) % (bgw - 90), (i * 61) % (bgh - 70),
-                        90, 70);
+        bw_fill (bg, colours[i % 6], (i * 37) % (bgw - 90), (i * 61) % (bgh - 70),
+                 90, 70);
     }
-    XSync (d, False);
+    bw_present (bg);
+    bw_sync ();
 
     tasks = bench_tasks ();
     warm = (tasks > 0) ? 60 : 0;
+    /*
+     * On Wayland nothing restacks another program's windows, so the
+     * translucent one maps at the starting gun instead: the last window up
+     * lands on top, which is the place the X11 run raises it to.
+     */
+    if (!fg_up && tasks == 0)
+    {
+        bw_map (fg);
+        bw_sync ();
+        fg_up = 1;
+    }
     start = bench_now ();
     mstart = start;
     for (i = 0; ; i++)
     {
         double due = start + i / rate;
 
-        XSetForeground (d, gc, colours[i % 6]);
-        XFillRectangle (d, fg, gc, (i * 23) % (fgw - 200),
-                        (i * 29) % (fgh - 150), 200, 150);
-        XSync (d, False);
+        bw_fill (fg, colours[i % 6], (i * 23) % (fgw - 200),
+                 (i * 29) % (fgh - 150), 200, 150);
+        bw_present (fg);
+        bw_sync ();
         steps++;
 
         if (tasks > 0)
         {
             if (i + 1 == warm)
             {
+                /*
+                 * The gate, then the window, then the marker - in that order.
+                 * The gate so the translucent window maps at the starting gun
+                 * and lands on top. The marker last because the scripts start
+                 * the clock, the compositor's CPU baseline and the power
+                 * sampling the moment they see it, and the compositor's cost
+                 * of creating this surface and answering its configure is not
+                 * work the X11 run pays for - there the window has been up
+                 * since long before. See gate.c.
+                 */
+                bench_wait_go ();
+                if (!fg_up)
+                {
+                    bw_map (fg);
+                    bw_sync ();
+                    fg_up = 1;
+                }
                 mark ("MEASURE-START");
                 mstart = bench_now ();
                 /*
@@ -198,10 +210,7 @@ int main (int argc, char **argv)
             break;
         }
 
-        while (bench_now () < due)
-        {
-            usleep (200);
-        }
+        bench_wait_until (due);
     }
 
     if (tasks > 0)
@@ -216,9 +225,9 @@ int main (int argc, char **argv)
                 seconds);
     }
 
-    XDestroyWindow (d, fg);
-    XDestroyWindow (d, bg);
-    XCloseDisplay (d);
+    bw_destroy (fg);
+    bw_destroy (bg);
+    bw_close ();
 
     return 0;
 }

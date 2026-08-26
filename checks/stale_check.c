@@ -23,10 +23,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include "capture.h"
-#include "polite.h"
+#include "win.h"
+#include "place.h"
 
 #define BAND    40
 #define NCOL    8
@@ -60,20 +58,20 @@ static int colour_index (unsigned long pixel)
     return -1;
 }
 
-static void draw_pattern (Display *d, Window w, GC gc, int offset)
+static void draw_pattern (bw_win *w, int offset)
 {
     int start = -(offset % BAND);
     int j = 0, y;
 
     for (y = start; y < WINH; y += BAND, j++)
     {
-        XSetForeground (d, gc, palette[(offset / BAND + j) % NCOL]);
-        XFillRectangle (d, w, gc, 0, y, WINW, BAND);
+        bw_fill (w, palette[(offset / BAND + j) % NCOL], 0, y, WINW, BAND);
     }
+    bw_present (w);
 }
 
 /* Every sampled pixel must be the colour this offset calls for */
-static int matches (XImage *img, int offset, int *bad_row)
+static int matches (bw_image *img, int offset, int *bad_row)
 {
     int x, y;
 
@@ -83,7 +81,7 @@ static int matches (XImage *img, int offset, int *bad_row)
         {
             int px = (img->width / 6) * (x + 1);
 
-            if (colour_index (XGetPixel (img, px, y)) !=
+            if (colour_index (bw_pixel (img, px, y)) !=
                 band_of (y + MARGIN, offset))
             {
                 *bad_row = y;
@@ -98,69 +96,59 @@ static int matches (XImage *img, int offset, int *bad_row)
 
 int main (int argc, char **argv)
 {
-    Display *d;
-    Window root, w1, w2, child;
-    GC gc1, gc2;
-    XImage *img;
-    int scr, rounds = (argc > 1) ? atoi (argv[1]) : 3;
+    bw_win *w1, *w2;
+    bw_image *img;
+    int rounds = (argc > 1) ? atoi (argv[1]) : 3;
     int r, i, ox, oy, bad = 0;
     int settled_ok = 0, settled_bad = 0, stale_ok = 0, stale_bad = 0;
 
-    d = XOpenDisplay (NULL);
-    if (d == NULL)
+    if (!bw_open ())
     {
         fprintf (stderr, "no display\n");
 
         return 2;
     }
-    scr = DefaultScreen (d);
-    root = RootWindow (d, scr);
-
-    w1 = XCreateSimpleWindow (d, root, 100, 100, WINW, WINH, 0,
-                              BlackPixel (d, scr), BlackPixel (d, scr));
-    w2 = XCreateSimpleWindow (d, root, 100 + WINW + 120, 100, WINW, WINH, 0,
-                              BlackPixel (d, scr), BlackPixel (d, scr));
-    XStoreName (d, w1, "stale_check pattern");
-    XStoreName (d, w2, "stale_check noise");
 
     /*
-     * Without position hints the window manager places these itself, and it
-     * happily puts the noise window on top of the pattern one, at which point
-     * the capture is of the wrong window and everything looks stale. The size
-     * is asked for the same way and for the same reason: every capture below
-     * reads a fixed WINW x WINH region, so a window the manager resized is
-     * photographed along with whatever is beside it, which reads as stale.
+     * Position and size are asked for and held: the window manager happily
+     * puts the noise window on top of the pattern one otherwise, at which
+     * point the capture is of the wrong window and everything looks stale.
+     * Every capture below reads a fixed WINW x WINH region, so a window the
+     * manager resized would be photographed along with whatever is beside it,
+     * which reads as stale too.
      */
+    w2 = bw_create (NULL, 100 + WINW + 120, 100, WINW, WINH,
+                    "stale_check noise",
+                    BW_PLACED | BW_FIXED | BW_AIMED | BW_UNMANAGED);
+    w1 = bw_create (NULL, 100, 100, WINW, WINH,
+                    "stale_check pattern",
+                    BW_PLACED | BW_FIXED | BW_AIMED | BW_UNMANAGED);
+    if (w1 == NULL || w2 == NULL)
     {
-        XSizeHints h;
+        fprintf (stderr, "no window\n");
 
-        h.flags = USPosition | USSize | PPosition | PSize |
-                  PMinSize | PMaxSize;
-        h.width = h.min_width = h.max_width = WINW;
-        h.height = h.min_height = h.max_height = WINH;
-        h.x = 100; h.y = 100;
-        XSetWMNormalHints (d, w1, &h);
-        h.x = 100 + WINW + 120;
-        XSetWMNormalHints (d, w2, &h);
+        return 2;
+    }
+    if (!bench_aimable (w1))
+    {
+        return 3;
     }
 
-    XMapWindow (d, w2);
-    XMapWindow (d, w1);
-    gc1 = XCreateGC (d, w1, 0, NULL);
-    gc2 = XCreateGC (d, w2, 0, NULL);
-    XSync (d, False);
+    bw_map (w2);
+    bw_map (w1);
+    bw_sync ();
     sleep (3);
     /* The pattern window must be the visible one wherever they ended up */
-    XRaiseWindow (d, w1);
-    polite_activate (d, root, w1);
-    XSync (d, False);
+    bw_raise (w1);
+    bw_activate (w1);
+    bw_sync ();
     sleep (1);
 
-    XTranslateCoordinates (d, w1, root, 0, 0, &ox, &oy, &child);
+    bw_where (w1, &ox, &oy, NULL, NULL);
     {
         int x2, y2;
 
-        XTranslateCoordinates (d, w2, root, 0, 0, &x2, &y2, &child);
+        bw_where (w2, &x2, &y2, NULL, NULL);
         printf ("pattern at %d,%d  noise at %d,%d\n", ox, oy, x2, y2);
         if (ox < x2 + WINW && x2 < ox + WINW &&
             oy < y2 + WINH && y2 < oy + WINH)
@@ -181,21 +169,21 @@ int main (int argc, char **argv)
          */
         for (i = 0; i < 150; i++)
         {
-            draw_pattern (d, w1, gc1, offset);
-            XFlush (d);
+            draw_pattern (w1, offset);
             usleep (4000);
+            bw_pump ();
             offset += STEP;
         }
         /* Land on a whole band so the expected picture is unambiguous */
         offset += BAND - (offset % BAND);
-        draw_pattern (d, w1, gc1, offset);
-        XSync (d, False);
+        draw_pattern (w1, offset);
+        bw_sync ();
         usleep (600000);
 
         for (i = 0; i < 3; i++)
         {
-            img = capture_region (d, root, ox + MARGIN, oy + MARGIN,
-                             WINW - 2 * MARGIN, WINH - 2 * MARGIN);
+            img = bw_capture (ox + MARGIN, oy + MARGIN,
+                              WINW - 2 * MARGIN, WINH - 2 * MARGIN);
             if (img == NULL)
             {
                 fprintf (stderr, "capture failed\n");
@@ -212,7 +200,7 @@ int main (int argc, char **argv)
                 printf ("round %d: settled capture wrong from row %d\n",
                         r + 1, bad);
             }
-            XDestroyImage (img);
+            bw_image_free (img);
             usleep (150000);
         }
 
@@ -223,20 +211,21 @@ int main (int argc, char **argv)
          */
         for (i = 0; i < 400; i++)
         {
-            XSetForeground (d, gc2, palette[i % NCOL]);
-            XFillRectangle (d, w2, gc2, (i * 37) % 700, (i * 53) % 500,
-                            200, 200);
+            bw_fill (w2, palette[i % NCOL], (i * 37) % 700, (i * 53) % 500,
+                     200, 200);
             if ((i % 40) == 0)
             {
-                XFlush (d);
+                bw_present (w2);
                 usleep (10000);
+                bw_pump ();
             }
         }
-        XSync (d, False);
+        bw_present (w2);
+        bw_sync ();
         usleep (400000);
 
-        img = capture_region (d, root, ox + MARGIN, oy + MARGIN,
-                         WINW - 2 * MARGIN, WINH - 2 * MARGIN);
+        img = bw_capture (ox + MARGIN, oy + MARGIN,
+                          WINW - 2 * MARGIN, WINH - 2 * MARGIN);
         if (img == NULL)
         {
             fprintf (stderr, "capture failed\n");
@@ -253,13 +242,13 @@ int main (int argc, char **argv)
             printf ("round %d: window went stale from row %d\n",
                     r + 1, bad);
         }
-        XDestroyImage (img);
+        bw_image_free (img);
     }
 
 
-    XDestroyWindow (d, w1);
-    XDestroyWindow (d, w2);
-    XCloseDisplay (d);
+    bw_destroy (w1);
+    bw_destroy (w2);
+    bw_close ();
 
     printf ("settled %d ok %d wrong, stale %d ok %d wrong\n",
             settled_ok, settled_bad, stale_ok, stale_bad);

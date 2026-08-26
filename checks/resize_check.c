@@ -28,10 +28,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include "capture.h"
-#include <X11/Xatom.h>
+#include "win.h"
+#include "place.h"
 
 #define BAND     32
 #define NCOL      8
@@ -67,48 +65,41 @@ static int colour_index (unsigned long pixel)
 
 int main (int argc, char **argv)
 {
-    Display *d;
-    Window root, win;
-    GC gc;
-    XSetWindowAttributes swa;
-    XImage *img;
-    int scr, steps = (argc > 1) ? atoi (argv[1]) : 120;
+    bw_win *win;
+    bw_image *img;
+    int steps = (argc > 1) ? atoi (argv[1]) : 120;
     int managed = (argc > 2 && !strcmp (argv[2], "managed"));
-    int s, i, x, y, px, py, offset = 0;
+    int sw, sh, s, i, x, y, px, py, offset = 0;
     int clean = 0, incoherent = 0, foreign = 0, edge_bad = 0, blind = 0;
     int no_capture = 0;
 
-    d = XOpenDisplay (NULL);
-    if (d == NULL)
+    if (!bw_open ())
     {
         fprintf (stderr, "no display\n");
 
         return 2;
     }
-    scr = DefaultScreen (d);
-    root = RootWindow (d, scr);
-    px = (DisplayWidth (d, scr) - BASEW) / 2;
-    py = (DisplayHeight (d, scr) - BASEH) / 2;
+    bw_screen_size (&sw, &sh);
+    px = (sw - BASEW) / 2;
+    py = (sh - BASEH) / 2;
 
-    /* Override redirect: no frame, no manager, so the resize is immediate */
-    memset (&swa, 0, sizeof swa);
-    swa.override_redirect = managed ? False : True;
-    swa.background_pixel = BlackPixel (d, scr);
-    win = XCreateWindow (d, root, px, py, BASEW, BASEH, 0, CopyFromParent,
-                         InputOutput, CopyFromParent,
-                         CWOverrideRedirect | CWBackPixel, &swa);
-    if (managed)
+    /* Unmanaged by default: no frame, no manager, so the resize is immediate */
+    win = bw_create (NULL, px, py, BASEW, BASEH,
+                     managed ? "resize_check" : NULL,
+                     managed ? BW_LOOSE : BW_POPUP);
+    if (win == NULL)
     {
-        Atom wt = XInternAtom (d, "_NET_WM_WINDOW_TYPE", False);
-        Atom nm = XInternAtom (d, "_NET_WM_WINDOW_TYPE_NORMAL", False);
+        fprintf (stderr, "no window\n");
 
-        XChangeProperty (d, win, wt, XA_ATOM, 32, PropModeReplace,
-                         (unsigned char *) &nm, 1);
-        XStoreName (d, win, "resize_check");
+        return 2;
     }
-    XMapRaised (d, win);
-    gc = XCreateGC (d, win, 0, NULL);
-    XSync (d, False);
+    if (!bench_aimable (win))
+    {
+        return 3;
+    }
+    bw_map (win);
+    bw_raise (win);
+    bw_sync ();
     sleep (2);
 
     /*
@@ -124,8 +115,8 @@ int main (int argc, char **argv)
         int start, j, fits = -1, covered = 0;
         int iw, ih;
 
-        XResizeWindow (d, win, w, h);
-        XRaiseWindow (d, win);
+        bw_resize (win, w, h);
+        bw_raise (win);
         if (managed)
         {
             /*
@@ -134,29 +125,20 @@ int main (int argc, char **argv)
              * read back rather than assumed. Capturing an area the window does
              * not occupy yet looks exactly like a defect and is not one.
              */
-            XWindowAttributes wa;
-            Window ch;
-
-            XSync (d, False);
+            bw_sync ();
             usleep (25000);
-            if (!XGetWindowAttributes (d, win, &wa))
-            {
-                continue;
-            }
-            w = wa.width;
-            h = wa.height;
-            XTranslateCoordinates (d, win, root, 0, 0, &px, &py, &ch);
+            bw_where (win, &px, &py, &w, &h);
         }
 
         /* The pattern, at this step's offset, over the whole new size */
         start = -(offset % BAND);
         for (y = start, j = 0; y < h; y += BAND, j++)
         {
-            XSetForeground (d, gc, palette[(offset / BAND + j) % NCOL]);
-            XFillRectangle (d, win, gc, 0, y, w, BAND);
+            bw_fill (win, palette[(offset / BAND + j) % NCOL], 0, y, w, BAND);
         }
-        XFlush (d);
+        bw_present (win);
         usleep (9000);
+        bw_pump ();
 
         /*
          * A region inside the smallest size the window ever takes, so it is
@@ -173,8 +155,8 @@ int main (int argc, char **argv)
         img = NULL;
         if (iw > 2 * INSET && ih > 2 * INSET)
         {
-            img = capture_region (d, root, px + INSET, py + INSET,
-                             iw - 2 * INSET, ih - 2 * INSET);
+            img = bw_capture (px + INSET, py + INSET,
+                              iw - 2 * INSET, ih - 2 * INSET);
         }
         if (img == NULL)
         {
@@ -194,7 +176,7 @@ int main (int argc, char **argv)
                 {
                     int cx = (img->width / 5) * (x + 1);
 
-                    if (colour_index (XGetPixel (img, cx, y)) !=
+                    if (colour_index (bw_pixel (img, cx, y)) !=
                         band_of (y + INSET, i))
                     {
                         ok = 0;
@@ -219,8 +201,7 @@ int main (int argc, char **argv)
          */
         if (s >= 0)
         {
-            XImage *edge = capture_region (d, root, px, py,
-                                           (unsigned) w, (unsigned) h);
+            bw_image *edge = bw_capture (px, py, w, h);
 
             if (edge != NULL)
             {
@@ -232,7 +213,7 @@ int main (int argc, char **argv)
                 {
                     for (fx = 2; fx < edge->width - 2; fx += 3)
                     {
-                        if (colour_index (XGetPixel (edge, fx, fy)) < 0)
+                        if (colour_index (bw_pixel (edge, fx, fy)) < 0)
                         {
                             bad++;
                             if (fx < minx) { minx = fx; }
@@ -272,7 +253,7 @@ int main (int argc, char **argv)
                                 "colour of the pattern\n", s, bad);
                     }
                 }
-                XDestroyImage (edge);
+                bw_image_free (edge);
             }
         }
 
@@ -291,7 +272,7 @@ int main (int argc, char **argv)
             for (y = 0; y < img->height; y += 6)
             {
                 total++;
-                if (colour_index (XGetPixel (img, img->width / 2, y)) >= 0)
+                if (colour_index (bw_pixel (img, img->width / 2, y)) >= 0)
                 {
                     known++;
                 }
@@ -301,7 +282,7 @@ int main (int argc, char **argv)
                 /*
                  * Not one row of ours anywhere: we are photographing another
                  * window, not a defect in this one. See the same reasoning at
-                 * the edge test below. The edge test looks at the same step
+                 * the edge test above. The edge test looks at the same step
                  * and may have said so already, and one step covered is one
                  * step that proved nothing, not two.
                  */
@@ -325,12 +306,12 @@ int main (int argc, char **argv)
                 printf ("step %d: pattern colours but no single offset fits\n", s);
             }
         }
-        XDestroyImage (img);
+        bw_image_free (img);
         offset += BAND / 4;
     }
 
-    XDestroyWindow (d, win);
-    XCloseDisplay (d);
+    bw_destroy (win);
+    bw_close ();
 
     printf ("resizes: %d coherent, %d mixed, %d not the pattern, "
             "%d with a band at an edge, %d proved nothing, "

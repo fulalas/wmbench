@@ -26,7 +26,7 @@
 #include <unistd.h>
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
-#include "capture.h"
+#include "win.h"
 
 /* Summed over the three channels, so a hair of dithering is not a difference */
 #define TOL      24
@@ -138,7 +138,7 @@ static unsigned char *covered_mask (Display *d, Window root, int w, int h)
  * the two are different answers and the caller has to tell them apart.
  * *open is how much of the screen was judged at all.
  */
-static double compare_ppm (const char *path, XImage *img,
+static double compare_ppm (const char *path, bw_image *img,
                            const unsigned char *mask, double *open,
                            int *y0, int *y1)
 {
@@ -188,7 +188,7 @@ static double compare_ppm (const char *path, XImage *img,
                 continue;
             }
             seen++;
-            p = XGetPixel (img, x, y);
+            p = bw_pixel (img, x, y);
             dr = (int) ((p >> 16) & 0xff) - row[x * 3];
             dg = (int) ((p >> 8) & 0xff) - row[x * 3 + 1];
             db = (int) (p & 0xff) - row[x * 3 + 2];
@@ -215,7 +215,7 @@ int main (int argc, char **argv)
     Display *d;
     Window root;
     XWindowAttributes wa;
-    XImage *img = NULL;
+    bw_image *img = NULL;
     unsigned char *mask = NULL;
     double pc, open;
     int y0, y1, rc;
@@ -227,6 +227,20 @@ int main (int argc, char **argv)
 
         return 2;
     }
+    if (!bw_open ())
+    {
+        fprintf (stderr, "no display\n");
+
+        return 2;
+    }
+    if (bw_is_wayland ())
+    {
+        printf ("this session does not tell one window's place from "
+                "another's, so nothing can be masked out\n");
+
+        return 3;
+    }
+    /* The window tree, asked of X11 directly */
     d = XOpenDisplay (NULL);
     if (d == NULL)
     {
@@ -237,7 +251,7 @@ int main (int argc, char **argv)
     root = RootWindow (d, DefaultScreen (d));
     XGetWindowAttributes (d, root, &wa);
 
-    img = capture_region (d, root, 0, 0, wa.width, wa.height);
+    img = bw_capture (0, 0, wa.width, wa.height);
     if (img == NULL)
     {
         fprintf (stderr, "the screen cannot be photographed\n");
@@ -260,11 +274,11 @@ int main (int argc, char **argv)
             rc = 2;
             goto out;
         }
-        XDestroyImage (img);
+        bw_image_free (img);
 
         /* Is this screen still at all? */
         sleep (1);
-        img = capture_region (d, root, 0, 0, wa.width, wa.height);
+        img = bw_capture (0, 0, wa.width, wa.height);
         if (img == NULL)
         {
             fprintf (stderr, "the screen cannot be photographed\n");
@@ -332,11 +346,9 @@ int main (int argc, char **argv)
 
 out:
     free (mask);
-    if (img != NULL)
-    {
-        XDestroyImage (img);
-    }
+    bw_image_free (img);
     XCloseDisplay (d);
+    bw_close ();
 
     return rc;
 }

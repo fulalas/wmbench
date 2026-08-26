@@ -19,11 +19,9 @@
 #include <math.h>
 #include <time.h>
 #include <unistd.h>
-#include <X11/Xlib.h>
-#include <X11/Xatom.h>
 #include "gate.h"
 #include "now.h"
-#include "stage.h"
+#include "win.h"
 #include "place.h"
 
 #define WINW 1000               /* the size a big screen uses */
@@ -57,26 +55,9 @@ static void mark (const char *s)
     fflush (stdout);
 }
 
-static int plain_moves;         /* the pager request did nothing here */
-
-/*
- * Move (and size) a window, the way bench_probe_move() found this session
- * honours. See lib/place.c: some compositors ignore a plain client move of a
- * mapped window (mutter on Wayland does), others ignore the pager request
- * (labwc), and one ignores both (cosmic-comp).
- */
-static void put_window (Display *d, Window root, Window win,
-                        int x, int y, int w, int h)
-{
-    bench_move (d, root, win, x, y, w, h, plain_moves);
-}
-
 int main (int argc, char **argv)
 {
-    Display *d;
-    Window win, root;
-    GC gc;
-    Atom wtype, wtype_normal;
+    bw_win *win;
     double seconds = (argc > 1) ? atof (argv[1]) : 10.0;
     int resize = (argc > 2 && !strcmp (argv[2], "resize"));
     double rate = (argc > 3) ? atof (argv[3]) : 120.0;
@@ -85,7 +66,7 @@ int main (int argc, char **argv)
     {
         rate = 120.0;
     }
-    int scr, i, steps = 0, base_y;
+    int i, steps = 0, base_y;
     int winw, winh, cx, cy, rx, ry, room_w, room_h, stage_x, stage_y;
     long tasks, warm, done = 0;
     double start, mstart;
@@ -93,29 +74,21 @@ int main (int argc, char **argv)
         0xc04040, 0x40c040, 0x4040c0, 0xc0c040, 0xc040c0, 0x40c0c0
     };
 
-    d = XOpenDisplay (NULL);
-    if (d == NULL)
+    if (!bw_open ())
     {
         fprintf (stderr, "no display\n");
 
         return 2;
     }
-    scr = DefaultScreen (d);
-    root = RootWindow (d, scr);
 
-    /*
-     * Lower down when resizing, so the two of these in the stress mix do not
-     * sit on top of each other - but only where the screen has the room for
-     * the biggest size this walks through, frame and all.
-     */
     /*
      * The layout, worked out from the area the benchmark is allowed to use
      * rather than written down: the moving window walks its circle in the
      * upper band, and the resizing one sits in what is left below, where both
      * can be watched at once. Nothing here reaches outside that area on any
-     * screen. See stage.c.
+     * screen.
      */
-    bench_stage (d, MARGIN, &stage_x, &stage_y, &room_w, &room_h);
+    bw_stage (MARGIN, &stage_x, &stage_y, &room_w, &room_h);
     winw = MIN (WINW, room_w * 55 / 100);
     winh = MIN (WINH, room_h * 35 / 100);
     /* The circle keeps the whole window, at the widest it grows to, inside */
@@ -141,39 +114,48 @@ int main (int argc, char **argv)
         }
     }
 
-    win = XCreateSimpleWindow (d, root, cx, base_y, winw, winh, 0,
-                               BlackPixel (d, scr), WhitePixel (d, scr));
     /*
      * Resizing gets its own name and its own place on the screen: the stress
      * mix runs one of each at the same time, and two windows called the same
      * thing walking the same circle could be neither told apart nor stacked in
-     * a known order.
+     * a known order. Both ask for their spot: in the stress mix the resizing
+     * window has to sit in the lower band and above the scenery, the same
+     * scene X11 composites, and where nothing places windows it degrades to
+     * a managed toplevel that resizes itself, which runs everywhere.
      */
-    XStoreName (d, win, resize ? "movebench resize" : "movebench");
-    wtype = XInternAtom (d, "_NET_WM_WINDOW_TYPE", False);
-    wtype_normal = XInternAtom (d, "_NET_WM_WINDOW_TYPE_NORMAL", False);
-    XChangeProperty (d, win, wtype, XA_ATOM, 32, PropModeReplace,
-                     (unsigned char *) &wtype_normal, 1);
-    XMapWindow (d, win);
-    gc = XCreateGC (d, win, 0, NULL);
-    XSync (d, False);
+    win = bw_create (NULL, cx, base_y, winw, winh,
+                     resize ? "movebench resize" : "movebench",
+                     BW_PLACED | BW_LOOSE | BW_UNMANAGED);
+    if (win == NULL)
+    {
+        fprintf (stderr, "no window\n");
+
+        return 2;
+    }
+    bw_background_colour (win, 0xffffff);
+    bw_map (win);
+    bw_sync ();
     sleep (2);
 
     /* Something with detail in it, so the compositor has real pixels to move */
     for (i = 0; i < 60; i++)
     {
-        XSetForeground (d, gc, colours[i % 6]);
-        XFillRectangle (d, win, gc, (i * 53) % MAX (1, winw - 120),
-                        (i * 71) % MAX (1, winh - 90), 120, 90);
+        bw_fill (win, colours[i % 6], (i * 53) % MAX (1, winw - 120),
+                 (i * 71) % MAX (1, winh - 90), 120, 90);
     }
-    XSync (d, False);
+    bw_present (win);
+    bw_sync ();
 
     tasks = bench_tasks ();
     warm = (tasks > 0) ? 60 : 0;        /* the first moves are not counted */
+    /*
+     * Which way of moving a window this session honours. See lib/place.c.
+     * A resize variant that fell back to a managed Wayland toplevel asks for
+     * no moves at all, so there is nothing to probe and nothing to refuse.
+     */
+    if (!(resize && !bw_win_placed (win)))
     {
-        int way = bench_probe_move (d, root, win, cx, base_y, winw, winh);
-
-        plain_moves = (way == 1);
+        bench_probe_move (win, cx, base_y, winw, winh);
     }
 
 
@@ -206,9 +188,9 @@ int main (int argc, char **argv)
         int nw = MAX (200, winw - 200 + (int) (180.0 * (1.0 + cos (a))));
         int nh = MAX (150, winh - 150 + (int) (130.0 * (1.0 + sin (a))));
 
-        put_window (d, root, win, x, y, resize ? nw : 0, resize ? nh : 0);
+        bench_move (win, x, y, resize ? nw : 0, resize ? nh : 0);
         /* Wait for the server to have done it, so this counts real work */
-        XSync (d, False);
+        bw_sync ();
         steps++;
         /*
          * Now and then, look at where the window really is. A compositor can
@@ -218,7 +200,7 @@ int main (int argc, char **argv)
          */
         if ((i % 64) == 0)
         {
-            bench_watch (d, win);
+            bench_watch (win);
         }
 
         if (tasks > 0)
@@ -256,10 +238,7 @@ int main (int argc, char **argv)
          * free it just measures how fast this program can spam the server,
          * which came out at 89000 steps a second and composited none of them.
          */
-        while (bench_now () < due)
-        {
-            usleep (200);
-        }
+        bench_wait_until (due);
     }
 
     if (tasks > 0)
@@ -274,8 +253,13 @@ int main (int argc, char **argv)
                 seconds);
     }
 
-    XDestroyWindow (d, win);
-    XCloseDisplay (d);
+    /* The second half of the Wayland proof, outside the measured window */
+    if (!resize)
+    {
+        bench_verify_end (win);
+    }
+    bw_destroy (win);
+    bw_close ();
 
     /*
      * The window never went anywhere, so there is no moving to measure. Say

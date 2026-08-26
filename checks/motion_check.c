@@ -20,10 +20,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <limits.h>
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include "capture.h"
-#include "polite.h"
+#include "win.h"
+#include "place.h"
 #include "gate.h"
 #include "now.h"
 
@@ -73,54 +71,54 @@ static int colour_index (unsigned long pixel)
 
 int main (int argc, char **argv)
 {
-    Display *d;
-    Window win, root;
-    GC gc;
-    XImage *img;
-    int scr, want = (argc > 1) ? atoi (argv[1]) : 0;
+    bw_win *win;
+    bw_image *img;
+    int want = (argc > 1) ? atoi (argv[1]) : 0;
     int captures = 0, clean = 0, torn = 0, unknown = 0, nocapture = 0;
     int offset = 0, i, x, y, ox, oy;
+    unsigned flags;
     double limit, t0, pace, due;
 
-    d = XOpenDisplay (NULL);
-    if (d == NULL)
+    if (!bw_open ())
     {
         fprintf (stderr, "no display\n");
 
         return 2;
     }
-    scr = DefaultScreen (d);
-    root = RootWindow (d, scr);
 
-    win = XCreateSimpleWindow (d, root, 100, 100, WINW, WINH, 0,
-                               BlackPixel (d, scr), BlackPixel (d, scr));
-    XStoreName (d, win, "motion_check");
     /*
      * In the middle of the stress mix this window has to stay on top: covered,
      * every capture is of somebody else's pixels and proves nothing.
      */
+    flags = BW_PLACED | BW_LOOSE | BW_AIMED | BW_UNMANAGED;
     if (getenv ("BENCH_ABOVE") != NULL)
     {
-        polite_keep_above (d, win);
+        flags |= BW_ABOVE;
     }
-    XSelectInput (d, win, ExposureMask | StructureNotifyMask);
-    XMapRaised (d, win);
-    gc = XCreateGC (d, win, 0, NULL);
+    win = bw_create (NULL, 100, 100, WINW, WINH, "motion_check", flags);
+    if (win == NULL)
+    {
+        fprintf (stderr, "no window\n");
+
+        return 2;
+    }
+    if (!bench_aimable (win))
+    {
+        return 3;
+    }
+    bw_map (win);
+    bw_raise (win);
 
     /* Let the window manager finish framing and mapping it */
-    XSync (d, False);
+    bw_sync ();
     sleep (2);
-    XRaiseWindow (d, win);
-    polite_activate (d, root, win);
-    XSync (d, False);
+    bw_raise (win);
+    bw_activate (win);
+    bw_sync ();
     sleep (1);
 
     /* Where the window really ended up, the frame having moved it */
-    {
-        Window child;
-
-        XTranslateCoordinates (d, win, root, 0, 0, &ox, &oy, &child);
-    }
+    bw_where (win, &ox, &oy, NULL, NULL);
 
     /* Everything is up: in a mix, start when the rest of the load does */
     bench_wait_go ();
@@ -143,7 +141,7 @@ int main (int argc, char **argv)
         int fits = -1;
 
         /*
-         * Draw the pattern at this offset and let the server have it. The
+         * Draw the pattern at this offset and let the session have it. The
          * bands start at -(offset % BAND) so that every row r really does
          * show palette[band_of (r, offset)], which is what the check below
          * asserts.
@@ -154,16 +152,16 @@ int main (int argc, char **argv)
 
             for (y = start; y < WINH; y += BAND, j++)
             {
-                XSetForeground (d, gc,
-                                palette[((offset / BAND + j) % NCOL)]);
-                XFillRectangle (d, win, gc, 0, y, WINW, BAND);
+                bw_fill (win, palette[((offset / BAND + j) % NCOL)],
+                         0, y, WINW, BAND);
             }
         }
-        XFlush (d);
+        bw_present (win);
         usleep (25000);
+        bw_pump ();
 
-        img = capture_region (d, root, ox + MARGIN, oy + MARGIN,
-                         WINW - 2 * MARGIN, WINH - 2 * MARGIN);
+        img = bw_capture (ox + MARGIN, oy + MARGIN,
+                          WINW - 2 * MARGIN, WINH - 2 * MARGIN);
         if (img == NULL)
         {
             fprintf (stderr, "capture failed\n");
@@ -185,7 +183,7 @@ int main (int argc, char **argv)
                 for (x = 0; x < 3; x++)
                 {
                     int px = (img->width / 4) * (x + 1);
-                    int c = colour_index (XGetPixel (img, px, y));
+                    int c = colour_index (bw_pixel (img, px, y));
 
                     if (c < 0 || c != band_of (y + MARGIN, i))
                     {
@@ -212,7 +210,7 @@ int main (int argc, char **argv)
             for (y = 0; y < img->height; y += 8)
             {
                 total++;
-                if (colour_index (XGetPixel (img, img->width / 2, y)) >= 0)
+                if (colour_index (bw_pixel (img, img->width / 2, y)) >= 0)
                 {
                     known++;
                 }
@@ -228,7 +226,7 @@ int main (int argc, char **argv)
             }
         }
 
-        XDestroyImage (img);
+        bw_image_free (img);
         offset += BAND / 4;
 
         /* Wait for this capture's slot to be over before taking the next */
@@ -236,11 +234,12 @@ int main (int argc, char **argv)
         if (pace > 0 && due > bench_now ())
         {
             usleep ((useconds_t) ((due - bench_now ()) * 1e6));
+            bw_pump ();
         }
     }
 
-    XDestroyWindow (d, win);
-    XCloseDisplay (d);
+    bw_destroy (win);
+    bw_close ();
 
     printf ("%d captures: %d clean, %d torn or stale, %d not our pattern\n",
             captures, clean, torn, unknown);

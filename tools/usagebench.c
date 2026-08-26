@@ -9,9 +9,9 @@
  * another and then all carried back at once. Raised over each other the way
  * alt-tab does. Fullscreen and back.
  *
- * Everything is plain X11 and EWMH, no input injection, so the run is the
- * same on every window manager and display server - which is the point: the
- * numbers are only comparable when every session did identical work.
+ * Nothing injects input, so the run is the same on every window manager and
+ * display server - which is the point: the numbers are only comparable when
+ * every session did identical work.
  *
  *   usagebench <seconds> [actions per second] [phase]
  *
@@ -24,7 +24,7 @@
  * and after every deterministic step write a checkpoint there: a line in
  * manifest.txt with the geometry that was asked for and the geometry the WM
  * actually gave, plus a screenshot of the window's own content (through
- * capture.c, so it works on Wayland too). Two sessions' checkpoint folders
+ * bw_capture, so it works on Wayland too). Two sessions' checkpoint folders
  * can then be compared pixel by pixel with compare_runs.sh: the content is
  * ours alone, so the desktop's own looks never enter the comparison.
  */
@@ -33,14 +33,9 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include <X11/Xatom.h>
-#include "capture.h"
-#include "polite.h"
 #include "gate.h"
 #include "now.h"
-#include "stage.h"
+#include "win.h"
 #include "place.h"
 
 #define WINW 900                /* the size a big screen uses */
@@ -71,30 +66,28 @@
 #define SBW     24              /* the scroll bar */
 #define CHEV    24              /* its chevron buttons */
 
-static Display *d;
 /*
  * The window size actually used, and the patch of screen everything is laid
- * out in: 1920x1080 or the screen if smaller, see stage.c. Maximising,
- * snapping to half the screen and going fullscreen are the window manager's
- * own geometry and use the real screen, sw and sh below.
+ * out in: 1920x1080 or the screen if smaller. Maximising, snapping to half
+ * the screen and going fullscreen are the window manager's own geometry and
+ * use the real screen, sw and sh below.
  */
 static int winw = WINW, winh = WINH;
 static int stage_x, stage_y, stage_w, stage_h;
-static Window root, wa, wb, carrier[4];
-static GC gc;
-static int scr, sw, sh, actions = 0;
-static Pixmap doc_buf;          /* the document is drawn here, copied once */
-static Pixmap bands_buf;        /* the bands, so a resize copies instead of drawing */
-static Pixmap bands_buf_b;      /* the same for the second window, its own offset */
+static bw_win *wa, *wb, *carrier[4];
+static int sw, sh, actions = 0;
+static bw_win *doc_buf;         /* the document is drawn here, copied once */
+static bw_win *bands_buf;       /* the bands, so a resize copies instead of drawing */
+static bw_win *bands_buf_b;     /* the same for the second window, its own offset */
 static const char *phase;       /* which part of the pass to run */
 static int fixed;               /* a fixed number of passes, not a clock */
 static int doc_px;              /* how far it is scrolled, in pixels */
 static double pace;
 static double run_start, run_seconds;   /* the clock, when there is one */
-static Atom net_state, state_max_h, state_max_v, state_fs;
 static const char *ckdir;
 static FILE *manifest;
 static int cknum;
+static int state_wrong;         /* a state the compositor never granted */
 
 static const unsigned long palette[NCOL] = {
     0xc04040, 0x40c040, 0x4040c0, 0xc0c040, 0xc040c0, 0x40c0c0
@@ -127,7 +120,7 @@ static int time_up (void);
 
 static void step (void)
 {
-    XSync (d, False);
+    bw_sync ();
     /*
      * On the clock, once the time is up the rest of the pass is walked
      * through without the pause between actions: the phases stop at their
@@ -142,25 +135,26 @@ static void step (void)
     }
     actions++;
     usleep ((useconds_t) (pace * 1e6));
+    bw_pump ();
 }
 
-static void draw_content_size (Window w, int offset, int width, int height)
+static void draw_content_size (bw_win *w, int offset, int width, int height)
 {
     int start = -(((offset % BAND) + BAND) % BAND);
     int j = 0, y;
 
     for (y = start; y < height; y += BAND, j++)
     {
-        XSetForeground (d, gc,
-                        palette[(((offset / BAND + j) % NCOL) + NCOL) % NCOL]);
-        XFillRectangle (d, w, gc, 0, y, (unsigned) width, BAND);
+        bw_fill (w, palette[(((offset / BAND + j) % NCOL) + NCOL) % NCOL],
+                 0, y, width, BAND);
     }
 }
 
 /* The whole screen's worth, so the window has content at any size */
-static void draw_content (Window w, int offset)
+static void draw_content (bw_win *w, int offset)
 {
     draw_content_size (w, offset, sw, sh);
+    bw_present (w);
 }
 
 /*
@@ -168,28 +162,22 @@ static void draw_content (Window w, int offset)
  * content looks like, saved as a PPM cut to the asked size at the actual
  * position - identical content across sessions unless something differs.
  */
-static void checkpoint_of (Window w, const char *name,
+static void checkpoint_of (bw_win *w, const char *name,
                            int ax, int ay, int aw, int ah)
 {
-    XWindowAttributes at;
-    XImage *img;
-    Window child;
-    int rx, ry;
+    bw_image *img;
+    int rx, ry, gw, gh;
 
     if (ckdir == NULL)
     {
         return;
     }
-    XSync (d, False);
+    bw_sync ();
     usleep (250000);            /* let the WM finish whatever it does */
 
-    if (!XGetWindowAttributes (d, w, &at))
-    {
-        return;
-    }
-    XTranslateCoordinates (d, w, root, 0, 0, &rx, &ry, &child);
+    bw_where (w, &rx, &ry, &gw, &gh);
     fprintf (manifest, "%02d %-14s asked %d,%d %dx%d  got %d,%d %dx%d\n",
-             cknum, name, ax, ay, aw, ah, rx, ry, at.width, at.height);
+             cknum, name, ax, ay, aw, ah, rx, ry, gw, gh);
     fflush (manifest);
 
     /* Clamp to the screen; what falls outside cannot be photographed */
@@ -198,24 +186,26 @@ static void checkpoint_of (Window w, const char *name,
     if (aw > sw - rx) aw = sw - rx;
     if (ah > sh - ry) ah = sh - ry;
     /*
-     * A window the WM left past the right or bottom edge clamps to nothing.
-     * The count still moves on, so the numbering keeps step with the manifest
-     * line written above.
+     * A window the WM left past the right or bottom edge clamps to nothing,
+     * and a position that is not a screen coordinate - an unplaced Wayland
+     * toplevel, or zone placement, whose origin is opaque by design - is
+     * nothing to aim a photograph at. The count still moves on, so the
+     * numbering keeps step with the manifest line written above.
      */
-    if (aw <= 0 || ah <= 0)
+    if (aw <= 0 || ah <= 0 || !bw_win_aimable (w))
     {
         cknum++;
 
         return;
     }
-    img = capture_region (d, root, rx, ry, (unsigned) aw, (unsigned) ah);
+    img = bw_capture (rx, ry, aw, ah);
     if (img != NULL)
     {
         char path[512];
 
         snprintf (path, sizeof path, "%s/ck-%02d-%s.ppm", ckdir, cknum, name);
         capture_write_ppm (path, img);
-        XDestroyImage (img);
+        bw_image_free (img);
     }
     cknum++;
 }
@@ -240,47 +230,50 @@ static int time_up (void)
     return !fixed && bench_now () - run_start >= run_seconds;
 }
 
-static int plain_moves;         /* the pager request did nothing here */
 static int scene_wrong;         /* the windows are not where the phase needs them */
 
 /*
- * Move (and size, when tw is not 0) the way bench_probe_move() found this
- * session honours. See lib/place.c.
+ * On Wayland a state is granted or it is not, and the compositor says which
+ * in its own configure events; asked for and never granted has to be caught,
+ * or the phase measures a window that sat still. On X11 the moves themselves
+ * are watched instead, the way they always were.
  */
-static void net_move (Window w, int x, int y, int tw, int th)
+static void expect_state (bw_win *w, unsigned mask, int on, const char *what)
 {
-    bench_move (d, root, w, x, y, tw, th, plain_moves);
-}
+    int i;
 
-/* Maximise, minimise, fullscreen: the window manager's own states */
-static void set_state (Window w, int on, Atom a, Atom b)
-{
-    XClientMessageEvent ev;
+    if (!bw_is_wayland () || time_up ())
+    {
+        return;
+    }
+    for (i = 0; i < 20; i++)    /* up to two seconds */
+    {
+        unsigned st = bw_state (w);
 
-    memset (&ev, 0, sizeof ev);
-    ev.type = ClientMessage;
-    ev.window = w;
-    ev.message_type = net_state;
-    ev.format = 32;
-    ev.data.l[0] = on ? 1 : 0;
-    ev.data.l[1] = (long) a;
-    ev.data.l[2] = (long) b;
-    ev.data.l[3] = 1;
-    XSendEvent (d, root, False,
-                SubstructureNotifyMask | SubstructureRedirectMask,
-                (XEvent *) &ev);
+        if (on ? (st & mask) != 0 : (st & mask) == 0)
+        {
+            return;
+        }
+        usleep (100000);
+    }
+    if (!state_wrong)
+    {
+        printf ("STATE-REFUSED the compositor never granted: %s\n", what);
+        fflush (stdout);
+    }
+    state_wrong = 1;
 }
 
 /* Back to a known place and size, whatever the last phase left behind */
-static void reset_window (Window w, int x, int y)
+static void reset_window (bw_win *w, int x, int y)
 {
     if (time_up ())
     {
         return;
     }
-    set_state (w, 0, state_max_h, state_max_v);
-    set_state (w, 0, state_fs, None);
-    net_move (w, x, y, winw, winh);
+    bw_maximize (w, 0);
+    bw_fullscreen (w, 0);
+    bench_move (w, x, y, winw, winh);
     step ();
 }
 
@@ -288,36 +281,55 @@ static void reset_window (Window w, int x, int y)
  * Walk the window in steps, the way a drag carries it, until its centre sits
  * on the given point - the middle of an edge, or a corner - the way a person
  * drags to tile. Then snap it to the given rectangle, what edge or corner
- * tiling leaves behind. Plain moves, so it is identical under every WM.
+ * tiling leaves behind. Plain moves, so it is identical under every WM. On
+ * Wayland nothing moves a managed toplevel, so the walk collapses and the
+ * snap is the client resizing itself to the tile's size, which is the half
+ * of the job a client is allowed.
  */
-static void walk_and_snap (Window w, int cx, int cy,
+static void walk_and_snap (bw_win *w, int cx, int cy,
                            int tx, int ty, int tw, int th)
 {
-    XWindowAttributes at;
-    int x0, y0, wx, wy, i;
-    Window child;
+    int x0, y0, gw, gh, wx, wy, i;
 
     if (time_up ())
     {
         return;
     }
-    XGetWindowAttributes (d, w, &at);
-    XTranslateCoordinates (d, w, root, 0, 0, &x0, &y0, &child);
-    wx = cx - at.width / 2;
-    wy = cy - at.height / 2;
-    for (i = 1; i <= 12; i++)
+    if (bw_win_placed (w))
     {
-        net_move (w, x0 + (wx - x0) * i / 12, y0 + (wy - y0) * i / 12, 0, 0);
-        XSync (d, False);
-        usleep (20000);
+        bw_where (w, &x0, &y0, &gw, &gh);
+        wx = cx - gw / 2;
+        wy = cy - gh / 2;
+        for (i = 1; i <= 12; i++)
+        {
+            bench_move (w, x0 + (wx - x0) * i / 12, y0 + (wy - y0) * i / 12, 0, 0);
+            bw_sync ();
+            usleep (20000);
+        }
     }
-    net_move (w, tx, ty, tw, th);
+    else
+    {
+        /*
+         * Nothing a client says moves a managed toplevel, so the walk is
+         * carried by the size instead. Dropping it outright left the Wayland
+         * pass a hundred-odd composited steps lighter than the X11 one it is
+         * compared with.
+         */
+        bw_where (w, NULL, NULL, &gw, &gh);
+        for (i = 1; i <= 12; i++)
+        {
+            bw_resize (w, gw + (tw - gw) * i / 12, gh + (th - gh) * i / 12);
+            bw_sync ();
+            usleep (20000);
+        }
+    }
+    bench_move (w, tx, ty, tw, th);
     step ();
     /*
      * Where it really went. A compositor can take every one of these and act
      * on none of them, and then the phase measured a window sitting still.
      */
-    bench_watch (d, w);
+    bench_watch (w);
 }
 
 /*
@@ -371,15 +383,12 @@ static void draw_document (int press_up, int press_down)
 {
     char line[160];
     int first = doc_px / LINEH, shift = doc_px % LINEH, i, y, track, th, ty;
-    XRectangle clip = { 0, 0, winw - SBW, winh };
-    XPoint tri[3];
+    bw_point tri[3];
 
-    XSetForeground (d, gc, 0xffffff);
-    XFillRectangle (d, doc_buf, gc, 0, 0, winw, winh);
+    bw_fill (doc_buf, 0xffffff, 0, 0, winw, winh);
 
     /* One line beyond each edge, clipped, so the edges cut cleanly */
-    XSetClipRectangles (d, gc, 0, 0, &clip, 1, Unsorted);
-    XSetForeground (d, gc, 0x202020);
+    bw_clip (doc_buf, 0, 0, winw - SBW, winh);
     for (i = -1; i * LINEH - shift < winh; i++)
     {
         if (first + i < 0 || first + i >= DOCLINES)
@@ -388,34 +397,31 @@ static void draw_document (int press_up, int press_down)
         }
         y = 18 + i * LINEH - shift;
         line_text (first + i, line, sizeof line);
-        XDrawString (d, doc_buf, gc, 12, y, line, (int) strlen (line));
+        bw_text (doc_buf, 0x202020, 12, y, line);
     }
-    XSetClipMask (d, gc, None);
+    bw_clip (doc_buf, 0, 0, -1, -1);
 
-    XSetForeground (d, gc, 0xd8d8d8);
-    XFillRectangle (d, doc_buf, gc, winw - SBW, 0, SBW, winh);
-    XSetForeground (d, gc, press_up ? 0x606060 : 0xb8b8b8);
-    XFillRectangle (d, doc_buf, gc, winw - SBW, 0, SBW, CHEV);
-    XSetForeground (d, gc, press_down ? 0x606060 : 0xb8b8b8);
-    XFillRectangle (d, doc_buf, gc, winw - SBW, winh - CHEV, SBW, CHEV);
-    XSetForeground (d, gc, 0x202020);
+    bw_fill (doc_buf, 0xd8d8d8, winw - SBW, 0, SBW, winh);
+    bw_fill (doc_buf, press_up ? 0x606060 : 0xb8b8b8, winw - SBW, 0, SBW, CHEV);
+    bw_fill (doc_buf, press_down ? 0x606060 : 0xb8b8b8,
+             winw - SBW, winh - CHEV, SBW, CHEV);
     tri[0].x = winw - SBW + 4;  tri[0].y = CHEV - 7;
     tri[1].x = winw - 4;        tri[1].y = CHEV - 7;
     tri[2].x = winw - SBW / 2;  tri[2].y = 6;
-    XFillPolygon (d, doc_buf, gc, tri, 3, Convex, CoordModeOrigin);
+    bw_poly (doc_buf, 0x202020, tri, 3);
     tri[0].x = winw - SBW + 4;  tri[0].y = winh - CHEV + 7;
     tri[1].x = winw - 4;        tri[1].y = winh - CHEV + 7;
     tri[2].x = winw - SBW / 2;  tri[2].y = winh - 6;
-    XFillPolygon (d, doc_buf, gc, tri, 3, Convex, CoordModeOrigin);
+    bw_poly (doc_buf, 0x202020, tri, 3);
 
     track = winh - 2 * CHEV;
     th = track * winh / (DOCLINES * LINEH);
     ty = CHEV + (track - th) * doc_px / (doc_max_px () ? doc_max_px () : 1);
-    XSetForeground (d, gc, 0x707070);
-    XFillRectangle (d, doc_buf, gc, winw - SBW + 3, ty, SBW - 6, th);
+    bw_fill (doc_buf, 0x707070, winw - SBW + 3, ty, SBW - 6, th);
 
-    XCopyArea (d, doc_buf, wa, gc, 0, 0, winw, winh, 0, 0);
-    XSync (d, False);
+    bw_copy (doc_buf, wa, 0, 0, winw, winh, 0, 0);
+    bw_present (wa);
+    bw_sync ();
 }
 
 /*
@@ -459,12 +465,11 @@ static void doc_glide (int to, int frames, int press_up, int press_down)
  */
 static void bands_ready (void)
 {
-    if (bands_buf != None)
+    if (bands_buf != NULL)
     {
         return;
     }
-    bands_buf = XCreatePixmap (d, wa, (unsigned) stage_w, (unsigned) stage_h,
-                               (unsigned) DefaultDepth (d, scr));
+    bands_buf = bw_canvas (stage_w, stage_h);
     draw_content_size (bands_buf, 0, stage_w, stage_h);
 
     /*
@@ -476,7 +481,7 @@ static void bands_ready (void)
      * the window losing its content. Filled from the pattern it is right
      * either way, so nothing wrong is ever on screen.
      */
-    XSetWindowBackgroundPixmap (d, wa, bands_buf);
+    bw_set_background (wa, bands_buf);
 
     /*
      * The second window needs one too. Without a background it keeps the black
@@ -485,15 +490,13 @@ static void bands_ready (void)
      * until something else happens to paint it. That reads as a black edge
      * flashing along the window being resized, on every step.
      */
-    if (bands_buf_b == None)
+    if (bands_buf_b == NULL)
     {
-        bands_buf_b = XCreatePixmap (d, wb, (unsigned) stage_w,
-                                     (unsigned) stage_h,
-                                     (unsigned) DefaultDepth (d, scr));
+        bands_buf_b = bw_canvas (stage_w, stage_h);
         draw_content_size (bands_buf_b, 3 * BAND, stage_w, stage_h);
     }
-    XSetWindowBackgroundPixmap (d, wb, bands_buf_b);
-    XSync (d, False);
+    bw_set_background (wb, bands_buf_b);
+    bw_sync ();
 }
 
 /*
@@ -547,7 +550,7 @@ static void drag_resize (int x0, int y0, int w0, int h0,
         y = y0 + (y1 - y0) * i / frames;
         w = w0 + (w1 - w0) * i / frames;
         h = h0 + (h1 - h0) * i / frames;
-        net_move (wa, x, y, w, h);
+        bench_move (wa, x, y, w, h);
         /*
          * Nothing is drawn here on purpose. The pattern is the window's
          * background, so the server fills every strip the window gains with
@@ -555,7 +558,7 @@ static void drag_resize (int x0, int y0, int w0, int h0,
          * program draws per step is drawn for a size the window may not have
          * yet, and a whole window redrawn while it is also moving tears.
          */
-        XSync (d, False);
+        bw_sync ();
         pace_step (&next, 16000);
     }
 
@@ -564,8 +567,8 @@ static void drag_resize (int x0, int y0, int w0, int h0,
      * window manager a step behind, and then the checkpoint would record a
      * size nobody asked for.
      */
-    net_move (wa, x1, y1, w1, h1);
-    XSync (d, False);
+    bench_move (wa, x1, y1, w1, h1);
+    bw_sync ();
     usleep (250000);
 
     /*
@@ -579,20 +582,20 @@ static void drag_resize (int x0, int y0, int w0, int h0,
      * A leg whose size never budged at all is the real refusal.
      */
     {
-        XWindowAttributes at;
+        int gw, gh;
 
-        if (XGetWindowAttributes (d, wa, &at) &&
-            (at.width == w0) && (at.height == h0) &&
-            ((w1 != w0) || (h1 != h0)))
+        bw_where (wa, NULL, NULL, &gw, &gh);
+        if ((gw == w0) && (gh == h0) && ((w1 != w0) || (h1 != h0)))
         {
-            plain_moves = !plain_moves;
-            net_move (wa, x1, y1, w1, h1);
-            XSync (d, False);
+            bench_flip_way ();
+            bench_move (wa, x1, y1, w1, h1);
+            bw_sync ();
             usleep (250000);
         }
     }
-    XCopyArea (d, bands_buf, wa, gc, 0, 0, (unsigned) w1, (unsigned) h1, 0, 0);
-    XSync (d, False);
+    bw_copy (bands_buf, wa, 0, 0, w1, h1, 0, 0);
+    bw_present (wa);
+    bw_sync ();
 }
 
 /* The four handles a person grabs, each out and back, never off the screen */
@@ -647,80 +650,14 @@ static void resize_phase (int bx, int by)
  * is a request, not a fact: asking and then carrying on assumes the pair is
  * acted on in order, and under XWayland it is not, which left a carrier
  * invisible and made the icon look like it teleported. So each one is waited
- * for. StructureNotifyMask is selected on the carriers when they are made.
+ * for. BW_NOTIFY on the carriers is what makes the wait possible.
  */
-static int wait_for (Window c, int type)
+static void show_carrier (bw_win *c, int x, int y)
 {
-    XEvent ev;
-    int i;
-
-    for (i = 0; i < 200; i++)   /* up to a second, then carry on regardless */
-    {
-        if (XCheckTypedWindowEvent (d, c, type, &ev))
-        {
-            return 1;
-        }
-        XFlush (d);
-        usleep (5000);
-    }
-
-    return 0;
-}
-
-/*
- * BENCH_DEBUG=1: say what the carrier really is at this moment - whether the
- * server has it mapped, where it sits, and how many big windows are stacked
- * above it. That is the difference between "not shown" and "shown behind
- * something", which look identical on screen.
- */
-static void carrier_state (Window c, const char *when)
-{
-    XWindowAttributes a, b;
-    Window par, r, *kids = NULL;
-    unsigned int n, i, above = 0;
-    int seen = 0;
-
-    if (getenv ("BENCH_DEBUG") == NULL)
-    {
-        return;
-    }
-    if (!XGetWindowAttributes (d, c, &a))
-    {
-        printf ("  %-12s carrier is gone\n", when);
-        fflush (stdout);
-
-        return;
-    }
-    if (XQueryTree (d, root, &r, &par, &kids, &n))
-    {
-        for (i = 0; i < n; i++)
-        {
-            if (kids[i] == c)
-            {
-                seen = 1;
-                continue;
-            }
-            if (seen && XGetWindowAttributes (d, kids[i], &b) &&
-                b.map_state == IsViewable && b.width > 200)
-            {
-                above++;
-            }
-        }
-        if (kids != NULL)
-        {
-            XFree (kids);
-        }
-    }
-    printf ("  %-12s mapped %s at %d,%d, %u big windows above it\n", when,
-            (a.map_state == IsViewable) ? "yes" : "no", a.x, a.y, above);
-    fflush (stdout);
-}
-
-static void show_carrier (Window c, int x, int y)
-{
-    XMoveWindow (d, c, x, y);
-    XMapRaised (d, c);
-    if (!wait_for (c, MapNotify))
+    bw_move_raw (c, x, y, 0, 0, 1);
+    bw_map (c);
+    bw_raise (c);
+    if (!bw_wait_shown (c, 1))
     {
         printf ("carrier did not map\n");
         fflush (stdout);
@@ -732,19 +669,18 @@ static void show_carrier (Window c, int x, int y)
      * the icon then looks like it teleported. A freshly created window is on
      * top by luck, not by right, so the raise is what actually matters.
      */
-    XMoveWindow (d, c, x, y);
-    XRaiseWindow (d, c);
-    XSync (d, False);
+    bw_move_raw (c, x, y, 0, 0, 1);
+    bw_raise (c);
+    bw_sync ();
     usleep (40000);             /* let the surface exist before it is drawn */
-    carrier_state (c, "after map");
 }
 
-static void hide_carrier (Window c)
+static void hide_carrier (bw_win *c)
 {
     const char *ms = getenv ("BENCH_DND_SETTLE");
 
-    XUnmapWindow (d, c);
-    if (!wait_for (c, UnmapNotify))
+    bw_unmap (c);
+    if (!bw_wait_shown (c, 0))
     {
         printf ("carrier did not unmap\n");
         fflush (stdout);
@@ -767,40 +703,35 @@ static void icon_cell (int i, int *cx, int *cy)
 }
 
 /* One icon: a sheet with a folded corner and a label bar under it */
-static void draw_icon (Drawable t, int x, int y, int i)
+static void draw_icon (bw_win *t, int x, int y, int i)
 {
-    XPoint fold[3];
+    bw_point fold[3];
 
-    XSetForeground (d, gc, palette[i % NCOL]);
-    XFillRectangle (d, t, gc, x, y, ICON, ICON);
-    XSetForeground (d, gc, 0xffffff);
+    bw_fill (t, palette[i % NCOL], x, y, ICON, ICON);
     fold[0].x = x + ICON - 22; fold[0].y = y;
     fold[1].x = x + ICON;      fold[1].y = y;
     fold[2].x = x + ICON;      fold[2].y = y + 22;
-    XFillPolygon (d, t, gc, fold, 3, Convex, CoordModeOrigin);
-    XSetForeground (d, gc, 0x303030);
-    XDrawRectangle (d, t, gc, x, y, ICON, ICON);
-    XFillRectangle (d, t, gc, x + 8, y + ICON + 8, ICON - 16, 6);
+    bw_poly (t, 0xffffff, fold, 3);
+    bw_rect (t, 0x303030, x, y, ICON, ICON);
+    bw_fill (t, 0x303030, x + 8, y + ICON + 8, ICON - 16, 6);
+    bw_present (t);
 }
 
 /* The two icon views: what is still here, what has been dropped, and whether
  * a drag is hovering over this one */
-static void draw_view (Window w, const char *title, const int *have,
+static void draw_view (bw_win *w, const char *title, const int *have,
                        int count, int hot)
 {
     int i, cx, cy;
 
-    XSetForeground (d, gc, 0xf0f0f0);
-    XFillRectangle (d, w, gc, 0, 0, winw, winh);
-    XSetForeground (d, gc, hot ? 0x3070d0 : 0xc0c0c0);
-    XDrawRectangle (d, w, gc, 24, 48, winw - 48, winh - 72);
-    XDrawRectangle (d, w, gc, 25, 49, winw - 50, winh - 74);
+    bw_fill (w, 0xf0f0f0, 0, 0, winw, winh);
+    bw_rect (w, hot ? 0x3070d0 : 0xc0c0c0, 24, 48, winw - 48, winh - 72);
+    bw_rect (w, hot ? 0x3070d0 : 0xc0c0c0, 25, 49, winw - 50, winh - 74);
     if (hot)
     {
-        XDrawRectangle (d, w, gc, 26, 50, winw - 52, winh - 76);
+        bw_rect (w, 0x3070d0, 26, 50, winw - 52, winh - 76);
     }
-    XSetForeground (d, gc, 0x404040);
-    XDrawString (d, w, gc, 40, 36, title, (int) strlen (title));
+    bw_text (w, 0x404040, 40, 36, title);
 
     for (i = 0; i < count; i++)
     {
@@ -812,20 +743,27 @@ static void draw_view (Window w, const char *title, const int *have,
         else
         {
             /* The gap an icon left behind */
-            XSetForeground (d, gc, 0xb0b0b0);
-            XDrawRectangle (d, w, gc, cx, cy, ICON, ICON);
+            bw_rect (w, 0xb0b0b0, cx, cy, ICON, ICON);
         }
     }
-    XSync (d, False);
+    bw_present (w);
+    bw_sync ();
 }
 
 /*
  * Icons dragged from one window into another. What the compositor sees is a
  * small frameless translucent window travelling over another window, which is
  * exactly what a drag is; the last leg carries four of them at once.
+ *
+ * The views have to sit at known spots for the flights to make sense. On
+ * X11 that is wa and wb moved side by side; on Wayland a managed toplevel
+ * sits wherever the compositor put it, so the phase plays out on two
+ * layer-shell windows of its own - and where there is no layer-shell the
+ * scene cannot be built and the phase says not done.
  */
 static void dnd_phase (int bx, int by)
 {
+    bw_win *va, *vb;
     int home[NICON], album[NICON];
     int order[4] = { 0, 3, 5, 6 };
     int k, f, i, cx, cy, tx, ty, x, y, nalbum = 0;
@@ -857,9 +795,28 @@ static void dnd_phase (int bx, int by)
         album[i] = -1;
     }
 
-    net_move (wa, lx, by, winw, winh);
-    net_move (wb, rx, by, winw, winh);
-    XSync (d, False);
+    /*
+     * The managed windows step aside and the drag plays out on two windows
+     * this program places itself, on either session: a managed Wayland
+     * toplevel cannot be put side by side with another at all, and doing it
+     * one way here and another way there would drag icons across two
+     * different scenes.
+     */
+    bw_unmap (wa);
+    bw_unmap (wb);
+    va = bw_create (NULL, lx, by, winw, winh, "usagebench A",
+                    BW_PLACED | BW_KEEP | BW_UNMANAGED);
+    vb = bw_create (NULL, rx, by, winw, winh, "usagebench B",
+                    BW_PLACED | BW_KEEP | BW_UNMANAGED);
+    if (va == NULL || vb == NULL)
+    {
+        scene_wrong = 1;
+
+        return;
+    }
+    bw_map (va);
+    bw_map (vb);
+    bw_sync ();
     usleep (300000);
     /*
      * The two views have to be side by side. Where they are is the question
@@ -867,18 +824,22 @@ static void dnd_phase (int bx, int by)
      * behind the one they left is not what this measures, however the two of
      * them came to be stacked that way.
      */
-    if (!bench_placed (d, wa, lx, by, "usagebench A"))
+    /* This phase runs after MEASURE-START, and the screenshot that proves a
+       believed position costs about 0.3 s that would land in the numbers */
+    bench_prove_places (0);
+    if (!bench_placed (va, lx, by, "usagebench A"))
     {
         scene_wrong = 1;
     }
-    if (!bench_placed (d, wb, rx, by, "usagebench B"))
+    if (!bench_placed (vb, rx, by, "usagebench B"))
     {
         scene_wrong = 1;
     }
-    XSync (d, False);
+    bench_prove_places (1);
+    bw_sync ();
     usleep (300000);
-    draw_view (wa, "Pictures", home, NICON, 0);
-    draw_view (wb, "Album", album, 0, 0);
+    draw_view (va, "Pictures", home, NICON, 0);
+    draw_view (vb, "Album", album, 0, 0);
     step ();
 
     /*
@@ -895,9 +856,16 @@ static void dnd_phase (int bx, int by)
      * cycling keeps the one window and shows every drag.
      */
     icon_cell (order[0], &cx, &cy);
+    /* A session that places the views but cannot show a carrier - zones
+       without layer-shell - has no drag to composite, and that is the
+       phase, not a detail of it */
+    if (!bw_win_placed (carrier[0]))
+    {
+        scene_wrong = 1;
+    }
     show_carrier (carrier[0], lx + cx, by + cy);
     draw_icon (carrier[0], 1, 1, order[0]);
-    XSync (d, False);
+    bw_sync ();
 
     for (k = 0; k < 4 && !time_up (); k++)
     {
@@ -906,18 +874,12 @@ static void dnd_phase (int bx, int by)
         icon_cell (nalbum, &tx, &ty);
 
         /* Lift: the slot empties and what was over it is now being carried */
-        if (getenv ("BENCH_DEBUG") != NULL)
-        {
-            printf ("drag %d\n", k + 1);
-            fflush (stdout);
-        }
         home[i] = -1;
-        draw_view (wa, "Pictures", home, NICON, 0);
-        XSync (d, False);
+        draw_view (va, "Pictures", home, NICON, 0);
+        bw_sync ();
         usleep (150000);
-        carrier_state (carrier[0], "at lift");
         snprintf (ckname, sizeof ckname, "dnd-lift-%d", k + 1);
-        checkpoint_of (wa, ckname, lx, by, winw, winh);
+        checkpoint_of (va, ckname, lx, by, winw, winh);
 
         /* Carried across in an arc, the way a hand moves */
         for (f = 1; f <= 55 && !time_up (); f++)
@@ -927,20 +889,19 @@ static void dnd_phase (int bx, int by)
             x = (int) ((lx + cx) + ((rx + tx) - (lx + cx)) * t);
             y = (int) ((by + cy) + ((by + ty) - (by + cy)) * t
                        - 90.0 * t * (1.0 - t) * 4.0);
-            XMoveWindow (d, carrier[0], x, y);
+            bw_move_raw (carrier[0], x, y, 0, 0, 1);
             draw_icon (carrier[0], 1, 1, i);
             if (f == 28)
             {
-                draw_view (wb, "Album", album, nalbum, 1);
-                carrier_state (carrier[0], "mid flight");
+                draw_view (vb, "Album", album, nalbum, 1);
             }
-            XSync (d, False);
+            bw_sync ();
             usleep (16000);
         }
 
         /* Dropped: the album has it now */
         album[nalbum++] = i;
-        draw_view (wb, "Album", album, nalbum, 0);
+        draw_view (vb, "Album", album, nalbum, 0);
 
         /*
          * And the carrier moves straight on to whatever it picks up next -
@@ -950,19 +911,19 @@ static void dnd_phase (int bx, int by)
         if (k + 1 < 4)
         {
             icon_cell (order[k + 1], &cx, &cy);
-            XMoveWindow (d, carrier[0], lx + cx, by + cy);
+            bw_move_raw (carrier[0], lx + cx, by + cy, 0, 0, 1);
             draw_icon (carrier[0], 1, 1, order[k + 1]);
         }
         else
         {
             icon_cell (0, &cx, &cy);
-            XMoveWindow (d, carrier[0], rx + cx, by + cy);
+            bw_move_raw (carrier[0], rx + cx, by + cy, 0, 0, 1);
             draw_icon (carrier[0], 1, 1, order[0]);
         }
-        XSync (d, False);
+        bw_sync ();
         step ();
         snprintf (ckname, sizeof ckname, "dnd-drop-%d", k + 1);
-        checkpoint_of (wb, ckname, rx, by, winw, winh);
+        checkpoint_of (vb, ckname, rx, by, winw, winh);
     }
 
     /* All four home again at once: four carriers travelling together */
@@ -983,7 +944,7 @@ static void dnd_phase (int bx, int by)
             show_carrier (carrier[k], rx + cx, by + cy);
             draw_icon (carrier[k], 1, 1, order[k]);
         }
-        XSync (d, False);
+        bw_sync ();
         usleep (200000);
 
         /* The album lets go of all four, and they are all being carried */
@@ -992,14 +953,15 @@ static void dnd_phase (int bx, int by)
         {
             album[i] = -1;
         }
-        draw_view (wb, "Album", album, 0, 0);
+        draw_view (vb, "Album", album, 0, 0);
         for (k = 0; k < 4; k++)
         {
             icon_cell (k, &cx, &cy);
-            XMoveWindow (d, carrier[k], ax + (rx + cx - ax), ay + (by + cy - ay));
+            bw_move_raw (carrier[k], ax + (rx + cx - ax), ay + (by + cy - ay),
+                         0, 0, 1);
             draw_icon (carrier[k], 1, 1, order[k]);
         }
-        XSync (d, False);
+        bw_sync ();
         usleep (300000);
 
         for (f = 1; f <= 55 && !time_up (); f++)
@@ -1010,14 +972,14 @@ static void dnd_phase (int bx, int by)
             y = (int) (ay + (hy - ay) * t - 90.0 * t * (1.0 - t) * 4.0);
             for (k = 0; k < 4; k++)
             {
-                XMoveWindow (d, carrier[k], x + k * 14, y + k * 10);
+                bw_move_raw (carrier[k], x + k * 14, y + k * 10, 0, 0, 1);
                 draw_icon (carrier[k], 1, 1, order[k]);
             }
             if (f == 28)
             {
-                draw_view (wa, "Pictures", home, NICON, 1);
+                draw_view (va, "Pictures", home, NICON, 1);
             }
-            XSync (d, False);
+            bw_sync ();
             usleep (16000);
         }
 
@@ -1026,69 +988,49 @@ static void dnd_phase (int bx, int by)
         {
             home[order[k]] = order[k];
         }
-        draw_view (wa, "Pictures", home, NICON, 0);
-        XSync (d, False);
+        draw_view (va, "Pictures", home, NICON, 0);
+        bw_sync ();
         for (k = 0; k < 4; k++)
         {
             hide_carrier (carrier[k]);
         }
         step ();
-        checkpoint_of (wa, "dnd-all-back", lx, by, winw, winh);
+        checkpoint_of (va, "dnd-all-back", lx, by, winw, winh);
     }
 
     /* Put the two windows back at the width and place the other phases expect */
     winw = wide;
-    net_move (wb, stage_x + (stage_w - winw) / 2 + 80, stage_y + 40,
+    bw_destroy (va);
+    bw_destroy (vb);
+    bw_map (wa);
+    bw_map (wb);
+    bench_move (wb, stage_x + (stage_w - winw) / 2 + 80, stage_y + 40,
               winw, winh);
-    net_move (wa, bx, by, winw, winh);
+    bench_move (wa, bx, by, winw, winh);
     draw_content (wa, 0);
     draw_content (wb, 3 * BAND);
-    XSync (d, False);
+    bw_sync ();
     step ();
 }
 
-static Window make_window (int x, int y, const char *name)
+static bw_win *make_window (int x, int y, const char *name)
 {
-    Window w;
-    XSizeHints hints;
-    Atom wtype, normal;
+    unsigned flags = BW_NOTIFY | BW_KEEP | BW_PLACED;
+    bw_win *w;
 
-    w = XCreateSimpleWindow (d, root, x, y, winw, winh, 0,
-                             BlackPixel (d, scr), BlackPixel (d, scr));
     /*
-     * Cleared first. Only the flags below are set, but the rest of the struct
-     * still travels to the window manager, and whatever the stack happened to
-     * hold reads as a minimum size, a maximum size, a size step or an aspect
-     * ratio. One window manager refused this window's resizes because of
-     * it: asked for 1400 wide at x=970, it granted 1110 at x=1265, so a
-     * resize leg ran into a wall part way through.
+     * The windows phase walks states that belong to a managed toplevel and to
+     * nothing else, so on Wayland it must never land on a layer surface,
+     * however placeable those are. Every other phase keeps plain placement,
+     * so it runs on the patch of screen the X11 run uses.
      */
-    memset (&hints, 0, sizeof hints);
-    hints.flags = USPosition | USSize | PPosition | PSize;
-    hints.x = x; hints.y = y; hints.width = winw; hints.height = winh;
-    /*
-     * Keep the pixels on a resize. The default is ForgetGravity, where the
-     * server throws the window's contents away every time its size changes
-     * and tiles it from the background again - a full window repaint per step
-     * of a resize, which flickers whether anything composites or not. With
-     * this, what is already drawn stays and only the strip the window gained
-     * has to be filled.
-     */
+    if (bw_is_wayland () &&
+        (strcmp (phase, "windows") == 0 || strcmp (phase, "all") == 0))
     {
-        XSetWindowAttributes at;
-
-        at.bit_gravity = NorthWestGravity;
-        XChangeWindowAttributes (d, w, CWBitGravity, &at);
+        flags |= BW_STATED;
     }
-
-    XSetWMNormalHints (d, w, &hints);
-    wtype = XInternAtom (d, "_NET_WM_WINDOW_TYPE", False);
-    normal = XInternAtom (d, "_NET_WM_WINDOW_TYPE_NORMAL", False);
-    XChangeProperty (d, w, wtype, XA_ATOM, 32, PropModeReplace,
-                     (unsigned char *) &normal, 1);
-    XStoreName (d, w, name);
-    XSelectInput (d, w, StructureNotifyMask);
-    XMapWindow (d, w);
+    w = bw_create (NULL, x, y, winw, winh, name, flags);
+    bw_map (w);
 
     return w;
 }
@@ -1136,22 +1078,18 @@ int main (int argc, char **argv)
         ckdir = NULL;
     }
 
-    d = XOpenDisplay (NULL);
-    if (d == NULL)
+    if (!bw_open ())
     {
         fprintf (stderr, "no display\n");
 
         return 2;
     }
-    scr = DefaultScreen (d);
-    root = RootWindow (d, scr);
-    sw = DisplayWidth (d, scr);
-    sh = DisplayHeight (d, scr);
+    bw_screen_size (&sw, &sh);
     /*
      * Everything this program places goes inside the stage, so it fits a
      * 1080p screen and does the same amount of work on any screen.
      */
-    bench_stage (d, SAFE, &stage_x, &stage_y, &stage_w, &stage_h);
+    bw_stage (SAFE, &stage_x, &stage_y, &stage_w, &stage_h);
     if (winw > stage_w)
     {
         winw = stage_w;
@@ -1169,59 +1107,51 @@ int main (int argc, char **argv)
         winh = (stage_y + stage_h - base_y) * 2 / 3;
     }
     base_x = stage_x + (stage_w - winw) / 2;
-    net_state = XInternAtom (d, "_NET_WM_STATE", False);
-    state_max_h = XInternAtom (d, "_NET_WM_STATE_MAXIMIZED_HORZ", False);
-    state_max_v = XInternAtom (d, "_NET_WM_STATE_MAXIMIZED_VERT", False);
-    state_fs = XInternAtom (d, "_NET_WM_STATE_FULLSCREEN", False);
 
     wb = make_window (base_x + 80, stage_y + 40, "usagebench B");
     wa = make_window (base_x, base_y, "usagebench A");
-    gc = XCreateGC (d, wa, 0, NULL);
-    doc_buf = XCreatePixmap (d, wa, winw, winh,
-                             (unsigned) DefaultDepth (d, scr));
+    doc_buf = bw_canvas (winw, winh);
 
     /*
      * The drag carriers: no frame, and translucent the way a drag icon is, so
      * the compositor has to blend one as it moves. Told about their own map
      * and unmap, so a drag never starts before the last one has finished.
      */
+    for (i = 0; i < 4; i++)
     {
-        XSetWindowAttributes swa;
-        unsigned long opacity = (unsigned long) (0.75 * 0xffffffffUL);
-
-        memset (&swa, 0, sizeof swa);
-        swa.override_redirect = True;
-        swa.background_pixel = 0xf0f0f0;
-        for (i = 0; i < 4; i++)
-        {
-            carrier[i] = XCreateWindow (d, root, 0, 0, ICON + 2, ICON + 2, 0,
-                                        CopyFromParent, InputOutput,
-                                        CopyFromParent,
-                                        CWOverrideRedirect | CWBackPixel, &swa);
-            XSelectInput (d, carrier[i], StructureNotifyMask);
-            XChangeProperty (d, carrier[i],
-                             XInternAtom (d, "_NET_WM_WINDOW_OPACITY", False),
-                             XA_CARDINAL, 32, PropModeReplace,
-                             (unsigned char *) &opacity, 1);
-        }
+        carrier[i] = bw_create (NULL, 0, 0, ICON + 2, ICON + 2, NULL,
+                                BW_POPUP | BW_NOTIFY);
+        bw_background_colour (carrier[i], 0xf0f0f0);
+        bw_opacity (carrier[i], 0.75);
     }
 
-    XSync (d, False);
+    bw_sync ();
     sleep (2);
 
-    /* Which way of moving a window this session honours. See lib/place.c */
+    /* Which way of moving a window this session honours. See lib/place.c.
+       A managed Wayland toplevel takes no moves at all, only states and
+       sizes, so there is nothing to probe against one. */
+    if (bw_win_placed (wa))
     {
-        int way = bench_probe_move (d, root, wa, base_x, base_y, winw, winh);
+        int way = bench_probe_move (wa, base_x, base_y, winw, winh);
 
-        plain_moves = (way == 1);
         if (manifest != NULL)
         {
             fprintf (manifest, "-- moves: %s\n",
-                     (way == 0) ? "the pager request"
+                     bw_is_wayland ()
+                   ? (way <= 0 ? "neither way works"
+                    : bw_where_live (wa) ? "zone placement"
+                                         : "layer-shell margins")
+                   : (way == 0) ? "the pager request"
                    : (way == 1) ? "plain client calls"
                                 : "neither way works");
             fflush (manifest);
         }
+    }
+    else if (manifest != NULL)
+    {
+        fprintf (manifest, "-- moves: states and client sizes (wayland)\n");
+        fflush (manifest);
     }
     /*
      * The pattern becomes both windows' background before anything resizes
@@ -1233,7 +1163,7 @@ int main (int argc, char **argv)
     bands_ready ();
     draw_content (wa, 0);
     draw_content (wb, 3 * BAND);
-    XSync (d, False);
+    bw_sync ();
     sleep (1);
 
     tasks = bench_tasks ();
@@ -1252,21 +1182,25 @@ int main (int argc, char **argv)
         /* Maximize and back */
         for (i = 0; i < 2 && (fixed || bench_now () - start < seconds); i++)
         {
-            set_state (wa, 1, state_max_h, state_max_v);
+            bw_maximize (wa, 1);
             step ();
-            set_state (wa, 0, state_max_h, state_max_v);
+            expect_state (wa, BW_STATE_MAX, 1, "maximize");
+            bw_maximize (wa, 0);
             step ();
+            expect_state (wa, BW_STATE_MAX, 0, "unmaximize");
         }
 
         /* Minimize and back */
         for (i = 0; i < 2 && (fixed || bench_now () - start < seconds); i++)
         {
-            XIconifyWindow (d, wa, scr);
+            bw_minimize (wa);
             step ();
-            XMapRaised (d, wa);
+            bw_restore (wa);
+            bw_raise (wa);
             /* Politely, or GNOME posts a notification instead of focusing */
-            polite_activate (d, root, wa);
+            bw_activate (wa);
             step ();
+            expect_state (wa, BW_STATE_ACTIVE, 1, "the restore from minimize");
         }
 
         /* To the middle of each side edge, snapped to half the screen */
@@ -1331,7 +1265,7 @@ int main (int argc, char **argv)
 
         /* The bands again, so every later phase has content at any size */
         draw_content (wa, 0);
-        XSync (d, False);
+        bw_sync ();
       }
 
       if (want_phase ("resize"))
@@ -1349,17 +1283,19 @@ int main (int argc, char **argv)
         /* Two windows raised over each other, the way alt-tab lands */
         for (i = 0; i < 3 && (fixed || bench_now () - start < seconds); i++)
         {
-            XRaiseWindow (d, wb);
+            bw_raise (wb);
             step ();
-            XRaiseWindow (d, wa);
+            bw_raise (wa);
             step ();
         }
 
         /* Fullscreen and back */
-        set_state (wa, 1, state_fs, None);
+        bw_fullscreen (wa, 1);
         step ();
-        set_state (wa, 0, state_fs, None);
+        expect_state (wa, BW_STATE_FULLSCREEN, 1, "fullscreen");
+        bw_fullscreen (wa, 0);
         step ();
+        expect_state (wa, BW_STATE_FULLSCREEN, 0, "leaving fullscreen");
       }
         pass++;
     } while (tasks > 0 ? pass < tasks
@@ -1374,21 +1310,22 @@ int main (int argc, char **argv)
 
     for (i = 0; i < 4; i++)
     {
-        XDestroyWindow (d, carrier[i]);
+        bw_destroy (carrier[i]);
     }
-    if (bands_buf != None)
+    if (bands_buf != NULL)
     {
-        XFreePixmap (d, bands_buf);
+        bw_destroy (bands_buf);
     }
-    if (bands_buf_b != None)
+    if (bands_buf_b != NULL)
     {
-        XFreePixmap (d, bands_buf_b);
+        bw_destroy (bands_buf_b);
     }
-    XFreePixmap (d, doc_buf);
-    XFreeGC (d, gc);
-    XDestroyWindow (d, wa);
-    XDestroyWindow (d, wb);
-    XCloseDisplay (d);
+    int on_wayland = bw_is_wayland ();
+
+    bw_destroy (doc_buf);
+    bw_destroy (wa);
+    bw_destroy (wb);
+    bw_close ();
 
     /*
      * Snapping and drag and drop are both built out of moves. Where nothing
@@ -1396,9 +1333,12 @@ int main (int argc, char **argv)
      * were dragged into a window sitting underneath the one they left - so
      * the row is left empty rather than filled with a number for a scene
      * nobody designed. Resizing and scrolling do not move anything, and are
-     * still worth measuring.
+     * still worth measuring. On Wayland the same question is answered by the
+     * compositor's configure events instead: a state asked for and never
+     * granted is the window that sat still.
      */
-    if (want_phase ("windows") && !bench_moved ())
+    if (want_phase ("windows") &&
+        (on_wayland ? state_wrong : !bench_moved ()))
     {
         printf ("MOVE-NEVER-HAPPENED the window stayed where it was\n");
         fflush (stdout);

@@ -21,10 +21,8 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include <X11/Xatom.h>
-#include "stage.h"
+#include "win.h"
+#include "now.h"
 #include "place.h"
 
 #define WINW 420
@@ -32,27 +30,22 @@
 
 int main (int argc, char **argv)
 {
-    Display *d;
-    Window *wins;
-    Pixmap pat[6];
-    GC gc;
-    Atom wtype, normal;
+    bw_win **wins;
+    bw_win *pat[6];
     int count = (argc > 1) ? atoi (argv[1]) : 20;
     double seconds = (argc > 2) ? atof (argv[2]) : 0.0;
-    int scr, i, j, cols, sw, sh, sx, sy;
+    int i, j, cols, sw, sh, sx, sy;
     unsigned long colours[6] = {
         0x904040, 0x409040, 0x404090, 0x909040, 0x904090, 0x409090
     };
 
-    d = XOpenDisplay (NULL);
-    if (d == NULL)
+    if (!bw_open ())
     {
         fprintf (stderr, "no display\n");
 
         return 2;
     }
-    scr = DefaultScreen (d);
-    bench_stage (d, 60, &sx, &sy, &sw, &sh);
+    bw_stage (60, &sx, &sy, &sw, &sh);
     cols = sw / (WINW + 40);
     if (cols < 1)
     {
@@ -65,43 +58,42 @@ int main (int argc, char **argv)
 
         return 2;
     }
-    wins = calloc (count, sizeof (Window));
+    wins = calloc (count, sizeof (bw_win *));
     if (wins == NULL)
     {
         fprintf (stderr, "out of memory\n");
 
         return 2;
     }
-    wtype = XInternAtom (d, "_NET_WM_WINDOW_TYPE", False);
-    normal = XInternAtom (d, "_NET_WM_WINDOW_TYPE_NORMAL", False);
 
     /*
      * The content is the windows' background rather than something painted
-     * once after mapping. Nothing here listens for Expose, and these windows
+     * once after mapping. Nothing here listens for damage, and these windows
      * are scenery other benchmarks move over - stress_start() walks two
      * windows across them - so a strip that is uncovered gets filled from the
      * background: painted once it would come back black and stay black,
      * wherever nothing composites and keeps the contents for us. The pattern
      * only depends on i % 6, so six of them cover any number of windows.
      */
-    gc = XCreateGC (d, RootWindow (d, scr), 0, NULL);
     for (i = 0; i < 6; i++)
     {
-        pat[i] = XCreatePixmap (d, RootWindow (d, scr), WINW, WINH,
-                                (unsigned) DefaultDepth (d, scr));
-        XSetForeground (d, gc, BlackPixel (d, scr));
-        XFillRectangle (d, pat[i], gc, 0, 0, WINW, WINH);
+        pat[i] = bw_canvas (WINW, WINH);
+        if (pat[i] == NULL)
+        {
+            fprintf (stderr, "out of memory\n");
+
+            return 2;
+        }
+        bw_fill (pat[i], 0x000000, 0, 0, WINW, WINH);
         for (j = 0; j < 24; j++)
         {
-            XSetForeground (d, gc, colours[(i + j) % 6]);
-            XFillRectangle (d, pat[i], gc, (j * 31) % (WINW - 70),
-                            (j * 43) % (WINH - 50), 70, 50);
+            bw_fill (pat[i], colours[(i + j) % 6], (j * 31) % (WINW - 70),
+                     (j * 43) % (WINH - 50), 70, 50);
         }
     }
 
     for (i = 0; i < count; i++)
     {
-        XSizeHints hints;
         /* However many fit; the rest start again from the top, offset */
         int rows = sh / (WINH + 60);
         int x, y;
@@ -114,32 +106,36 @@ int main (int argc, char **argv)
         y = sy + ((i / cols) % rows) * (WINH + 60);
         x += 25 * (i / (cols * rows));
 
-        wins[i] = XCreateSimpleWindow (d, RootWindow (d, scr), x, y,
-                                       WINW, WINH, 0, BlackPixel (d, scr),
-                                       BlackPixel (d, scr));
-        XSetWindowBackgroundPixmap (d, wins[i], pat[i % 6]);
-        /*
-         * Cleared first: only the flags below are set, but the whole struct
-         * still travels to the window manager, and whatever the stack held
-         * reads as a minimum size, a size step or an aspect ratio.
-         */
-        memset (&hints, 0, sizeof hints);
-        hints.flags = USPosition | USSize | PPosition | PSize;
-        hints.x = x; hints.y = y;
-        hints.width = WINW; hints.height = WINH;
-        XSetWMNormalHints (d, wins[i], &hints);
-        XChangeProperty (d, wins[i], wtype, XA_ATOM, 32, PropModeReplace,
-                         (unsigned char *) &normal, 1);
-        XStoreName (d, wins[i], "manywin");
-        XMapWindow (d, wins[i]);
+        wins[i] = bw_create (NULL, x, y, WINW, WINH, "manywin",
+                             BW_PLACED | BW_UNMANAGED);
+        if (wins[i] == NULL)
+        {
+            fprintf (stderr, "no window\n");
+
+            return 2;
+        }
+        bw_set_background (wins[i], pat[i % 6]);
+        bw_map (wins[i]);
     }
-    XSync (d, False);
+    bw_sync ();
     sleep (3);
-    bench_placed (d, wins[0], sx, sy, "manywin");
+    bench_placed (wins[0], sx, sy, "manywin");
 
     printf ("READY %d windows\n", count);
     fflush (stdout);
-    if (seconds > 0.0)
+    if (bw_is_wayland ())
+    {
+        /* The connection has to stay fed - a ping left unanswered is a
+           disconnect - so the scenery wakes now and then instead of pausing */
+        double end = bench_now () + seconds;
+
+        while (seconds <= 0.0 || bench_now () < end)
+        {
+            bw_pump ();
+            usleep (200000);
+        }
+    }
+    else if (seconds > 0.0)
     {
         usleep ((useconds_t) (seconds * 1e6));
     }
@@ -153,13 +149,13 @@ int main (int argc, char **argv)
 
     for (i = 0; i < count; i++)
     {
-        XDestroyWindow (d, wins[i]);
+        bw_destroy (wins[i]);
     }
     for (i = 0; i < 6; i++)
     {
-        XFreePixmap (d, pat[i]);
+        bw_destroy (pat[i]);
     }
-    XCloseDisplay (d);
+    bw_close ();
     free (wins);
 
     return 0;

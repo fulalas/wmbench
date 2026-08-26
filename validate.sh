@@ -38,6 +38,7 @@ tee_report "$OUT"
 # terminal case), only our own children when someone else does.
 on_int () {
     trap - INT TERM
+    let_sleep
     if [ "$(ps -o pgid= -p $$ | tr -d ' ')" = "$$" ]; then
         kill -- -$$ 2>/dev/null
     else
@@ -46,6 +47,9 @@ on_int () {
     exit 130
 }
 trap on_int INT TERM
+# and put the screen's own settings back however this run ends
+trap let_sleep EXIT
+keep_awake
 
 echo "session:    $ST (${XDG_CURRENT_DESKTOP:-unknown desktop})"
 echo "compositor: $WM_NAME $(wm_version) (pid ${WM_PID:-unknown})"
@@ -168,8 +172,9 @@ STACK_OK=1
 stress_settle || STACK_OK=0
 [ "${STRESS_LATE:-0}" = 1 ] && STACK_OK=0
 # The pattern being watched goes last of all: covered, it would be
-# photographing somebody else's window
-if [ -n "$LP" ]; then
+# photographing somebody else's window. On Wayland it holds itself in the
+# overlay layer, above everything, so there is nothing to ask for.
+if [ -n "$LP" ] && [ "$ST" = x11 ]; then
     ./tools/restack -w "motion_check" >> va-restack.log 2>&1
 fi
 : > "$GO"
@@ -256,6 +261,12 @@ if [ "${#UNPROVEN[@]}" != 0 ] || [ "${#BROKEN[@]}" != 0 ]; then
         for u in "${UNPROVEN[@]}"; do
             echo "    $u"
         done
+        if [ "$ST" = wayland ]; then
+            echo "  on wayland, shape_check and leftovers can exist nowhere"
+            echo "  (no shape concept, no way to read other windows' places);"
+            echo "  anything else on the list is a protocol this compositor"
+            echo "  does not speak, layer-shell or alpha-modifier usually"
+        fi
     fi
     if [ "${#BROKEN[@]}" != 0 ]; then
         echo "  the following tests could not run here at all:"
