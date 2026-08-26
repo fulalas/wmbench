@@ -35,6 +35,7 @@ static struct wl_registry *registry;
 static struct wl_compositor *compositor;
 static struct wl_shm *shm;
 static struct xdg_wm_base *wm_base;
+static struct wl_subcompositor *subcompositor;
 static struct zwlr_layer_shell_v1 *layer_shell;
 static struct xdg_activation_v1 *activation;
 static struct wp_alpha_modifier_v1 *alpha_mod;
@@ -63,7 +64,8 @@ static wl_out outs[MAX_OUTS];
 static int nouts;
 static wl_out *out;             /* the chosen one */
 
-typedef enum { K_TOPLEVEL, K_LAYER, K_XDG_POPUP, K_UNMAPPABLE } wl_kind;
+typedef enum { K_TOPLEVEL, K_LAYER, K_XDG_POPUP, K_SUBSURFACE,
+               K_UNMAPPABLE } wl_kind;
 
 typedef struct {
     struct wl_shm_pool *pool;
@@ -91,6 +93,7 @@ typedef struct {
     struct wp_alpha_modifier_surface_v1 *alpha;
     struct zxdg_toplevel_decoration_v1 *deco;
     struct xx_zone_item_v1 *zitem;
+    struct wl_subsurface *subsurf;
     struct zwp_idle_inhibitor_v1 *idle;
     int use_zone;
     int zx, zy, zvalid;         /* the compositor's own account, once given */
@@ -318,6 +321,10 @@ static void reg_global (void *data, struct wl_registry *r, uint32_t id,
     else if (strcmp (iface, wl_shm_interface.name) == 0)
     {
         shm = wl_registry_bind (r, id, &wl_shm_interface, 1);
+    }
+    else if (strcmp (iface, wl_subcompositor_interface.name) == 0)
+    {
+        subcompositor = wl_registry_bind (r, id, &wl_subcompositor_interface, 1);
     }
     else if (strcmp (iface, xdg_wm_base_interface.name) == 0)
     {
@@ -1152,6 +1159,12 @@ static const struct xdg_popup_listener popup_listener = {
 
 static wl_kind kind_of (bw_win *win)
 {
+    if ((win->flags & BW_CHILD) && win->parent != NULL)
+    {
+        /* Nothing else here is a child: a toplevel of its own would be a
+           window flying about, which is the thing this avoids asking for */
+        return subcompositor != NULL ? K_SUBSURFACE : K_UNMAPPABLE;
+    }
     if (win->flags & BW_GL)
     {
         return K_TOPLEVEL;
@@ -1263,6 +1276,11 @@ static void role_teardown (bw_win *win)
         xx_zone_item_v1_destroy (ww->zitem);
         ww->zitem = NULL;
         ww->zvalid = 0;
+    }
+    if (ww->subsurf != NULL)
+    {
+        wl_subsurface_destroy (ww->subsurf);
+        ww->subsurf = NULL;
     }
     if (ww->popup != NULL)
     {
@@ -1414,6 +1432,22 @@ static void wl_map (bw_win *win)
             break;
         }
 
+        case K_SUBSURFACE:
+        {
+            wl_win *pw = win->parent->impl;
+
+            ww->subsurf = wl_subcompositor_get_subsurface (subcompositor,
+                                                           ww->surf, pw->surf);
+            wl_subsurface_set_position (ww->subsurf, win->x, win->y);
+            /* Its own commits carry its own content; the parent's would
+               otherwise have to drive every frame of a drag */
+            wl_subsurface_set_desync (ww->subsurf);
+            /* Nothing configures a subsurface, so there is nothing to wait
+               for: it is on screen with the parent's next commit */
+            ww->configured = 1;
+            break;
+        }
+
         case K_TOPLEVEL:
         default:
             ww->xsurf = xdg_wm_base_get_xdg_surface (wm_base, ww->surf);
@@ -1486,6 +1520,18 @@ static void wl_map (bw_win *win)
     {
         raster_ensure (win);
         wl_present_ (win);
+    }
+    if (ww->kind == K_SUBSURFACE)
+    {
+        /* A child is on screen only once its parent commits, and a parent
+           that has been unmapped from under it has no surface to commit */
+        wl_win *pw = win->parent->impl;
+
+        if (pw->surf != NULL)
+        {
+            wl_surface_commit (pw->surf);
+            wl_display_flush (dpy);
+        }
     }
     if (win->name[0] != '\0')
     {
@@ -1638,15 +1684,17 @@ static int wl_win_placed (bw_win *win)
 {
     wl_win *ww = win->impl;
 
-    return ww->kind == K_LAYER || ww->kind == K_XDG_POPUP || ww->use_zone;
+    return ww->kind == K_LAYER || ww->kind == K_XDG_POPUP ||
+           ww->kind == K_SUBSURFACE || ww->use_zone;
 }
 
 static int wl_win_aimable (bw_win *win)
 {
     wl_win *ww = win->impl;
 
-    /* A zone hands back positions but keeps its own origin to itself */
-    return wl_win_placed (win) && !ww->use_zone;
+    /* A zone hands back positions but keeps its own origin to itself, and a
+       child's coordinates are its parent's, which nothing here knows */
+    return wl_win_placed (win) && !ww->use_zone && ww->kind != K_SUBSURFACE;
 }
 
 static void wl_resize_ (bw_win *win, int width, int height)
@@ -1711,6 +1759,30 @@ static int wl_move_raw (bw_win *win, int x, int y, int width, int height,
              * bench_watch and the screenshot bw_verify_at aims.
              */
             return -1;
+
+        case K_SUBSURFACE:
+        {
+            wl_win *pw = win->parent->impl;
+
+            win->x = x;
+            win->y = y;
+            if (ww->subsurf != NULL && pw->surf != NULL)
+            {
+                wl_subsurface_set_position (ww->subsurf, x, y);
+                /* A position rides the parent's commit however desynchronised
+                   the child is, so the parent is committed too */
+                wl_surface_commit (ww->surf);
+                wl_surface_commit (pw->surf);
+                wl_display_flush (dpy);
+            }
+            if (width > 0 && height > 0 &&
+                (width != win->w || height != win->h))
+            {
+                wl_resize_ (win, width, height);
+            }
+
+            return 0;
+        }
 
         case K_TOPLEVEL:
             if (ww->use_zone && ww->zitem != NULL)

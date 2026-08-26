@@ -9,31 +9,33 @@ benchmark the window manager this session is running
   ./benchmark.sh [test ...]     run everything, or only the tests named
 
 tests:
-  idle      nothing happening
-  move      a window moved 2400 steps at 120 a second
-  resize    two full cycles of resizing by every handle, corner and edge
-  dnd       drag and drop: one pass of icons over, then all back at once
-  popups    400 menus appearing and disappearing at 20 a second
-  video     1200 frames handed over through shared memory, the way a player
-            does, at 60 a second
-  argb      2400 redraws of a transparent window that declares an opaque
-            region, which is what every GTK window is, at 120 a second
-  windows   maximize, snap to the sides and corners, raise two windows
-            over each other, fullscreen and back, then minimize
-  scroll    a text document scrolled by the chevrons, then by dragging
-            the thumb the whole way and back
-  render    1200 frames of a GL window held to 60 fps
+  idle        nothing happening
+  move        a window moved 2400 steps at 120 a second
+  resize      two full cycles of resizing by every handle, corner and edge
+  dnd         drag and drop: one pass of icons over, then all back at once
+  popups      400 menus appearing and disappearing at 20 a second
+  video       1200 frames handed over through shared memory, the way a player
+              does, at 60 a second
+  argb        2400 redraws of a transparent window that declares an opaque
+              region, which is what every GTK window is, at 120 a second
+  windows     the states a window goes through: maximize and back twice, two
+              windows raised over each other, fullscreen and back, and
+              minimize last. Nothing here moves or resizes a window: that is
+              what move and resize are for
+  scroll      a text document scrolled by the chevrons, then by dragging the
+              thumb the whole way and back
+  render      1200 frames of a GL window held to 60 fps
   fullscreen  the same frames in a fullscreen window, twice: as it comes, and
-            asking compositing to step aside the way a player does - with
-            _NET_WM_BYPASS_COMPOSITOR on X11, and on Wayland by declaring the
-            whole surface opaque. Measured in power, not frames: leaving a
-            window out of compositing saves the compositor's work, not the
-            application's, so the frame rate cannot see it
-  uncapped  the frame rate flat out, windowed. Runs last
-  stress    everything at once: many windows, one moving, one resizing,
-            popups, a translucent window and a GL render. Each does the same
-            amount of work it does in its own test above, and it ends when
-            the last of them has finished it - not on the clock
+              asking compositing to step aside the way a player does - with
+              _NET_WM_BYPASS_COMPOSITOR on X11, and on Wayland by declaring
+              the whole surface opaque. Measured in power, not frames: leaving
+              a window out of compositing saves the compositor's work, not the
+              application's, so the frame rate cannot see it
+  uncapped    the frame rate flat out, windowed. Runs last
+  stress      everything at once: many windows, one moving, one resizing,
+              popups, a translucent window and a GL render. Each does the same
+              amount of work it does in its own test above, and it ends when
+              the last of them has finished it - not on the clock
 
 Every test does the same fixed amount of work in every session, however long
 that takes, so power and CPU time compare directly; the time it took is

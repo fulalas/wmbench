@@ -236,18 +236,38 @@ static void keep_above (Window w)
                      (unsigned char *) &above, 1);
 }
 
+static void x11_where (bw_win *, int *, int *, int *, int *);
+
 static int x11_create (bw_win *win)
 {
     x11_win *xw = calloc (1, sizeof *xw);
     XSetWindowAttributes swa;
     unsigned long swa_mask = 0;
     int unmanaged = (win->flags & (BW_POPUP | BW_UNMANAGED)) != 0;
+    int cx = win->x, cy = win->y;
 
     if (xw == NULL)
     {
         return 0;
     }
     memset (&swa, 0, sizeof swa);
+
+    /*
+     * A child is placed where its parent is, not where the screen is, and
+     * here that is all it means: a real child window would be cleared to its
+     * background wherever a moving sibling left it, which is a black trail
+     * behind every drag. X11 knows where windows are, so the offset is turned
+     * into a screen coordinate and the window stays a window.
+     */
+    if ((win->flags & BW_CHILD) && win->parent != NULL)
+    {
+        int px, py;
+
+        x11_where (win->parent, &px, &py, NULL, NULL);
+        cx += px;
+        cy += py;
+        unmanaged = 1;
+    }
 
     if (win->flags & BW_ARGB)
     {
@@ -279,7 +299,7 @@ static int x11_create (bw_win *win)
         swa.border_pixel = 0;
         swa.background_pixel = 0;
         swa.override_redirect = unmanaged;
-        xw->xid = XCreateWindow (d, root, win->x, win->y,
+        xw->xid = XCreateWindow (d, root, cx, cy,
                                  (unsigned) win->w, (unsigned) win->h, 0, 32,
                                  InputOutput, vi->visual,
                                  CWColormap | CWBorderPixel | CWBackPixel |
@@ -297,14 +317,14 @@ static int x11_create (bw_win *win)
         swa.override_redirect = True;
         swa.background_pixel = BlackPixel (d, scr);
         swa_mask = CWOverrideRedirect | CWBackPixel;
-        xw->xid = XCreateWindow (d, root, win->x, win->y,
+        xw->xid = XCreateWindow (d, root, cx, cy,
                                  (unsigned) win->w, (unsigned) win->h, 0,
                                  CopyFromParent, InputOutput, CopyFromParent,
                                  swa_mask, &swa);
     }
     else
     {
-        xw->xid = XCreateSimpleWindow (d, root, win->x, win->y,
+        xw->xid = XCreateSimpleWindow (d, root, cx, cy,
                                        (unsigned) win->w, (unsigned) win->h, 0,
                                        BlackPixel (d, scr), BlackPixel (d, scr));
     }
@@ -506,9 +526,8 @@ static int x11_win_placed (bw_win *win)
 
 static int x11_win_aimable (bw_win *win)
 {
-    (void) win;
-
-    return 1;
+    /* A child's coordinates are its parent's, not the screen's */
+    return !(win->flags & BW_CHILD);
 }
 
 /* The pager request, the one a taskbar sends */
@@ -538,6 +557,16 @@ static int x11_move_raw (bw_win *win, int x, int y, int width, int height,
 {
     Window w = ((x11_win *) win->impl)->xid;
 
+    /* Where the parent is, plus the offset asked for */
+    if ((win->flags & BW_CHILD) && win->parent != NULL)
+    {
+        int px, py;
+
+        x11_where (win->parent, &px, &py, NULL, NULL);
+        x += px;
+        y += py;
+        way = 1;
+    }
     if (way)
     {
         /*
@@ -580,7 +609,11 @@ static void x11_where (bw_win *win, int *x, int *y, int *width, int *height)
     {
         at.width = at.height = 0;
     }
-    XTranslateCoordinates (d, xw->xid, root, 0, 0, &rx, &ry, &child);
+    /* A child's place is its parent's business, not the screen's */
+    XTranslateCoordinates (d, xw->xid,
+                           ((win->flags & BW_CHILD) && win->parent != NULL)
+                               ? ((x11_win *) win->parent->impl)->xid : root,
+                           0, 0, &rx, &ry, &child);
     if (x != NULL) *x = rx;
     if (y != NULL) *y = ry;
     if (width != NULL) *width = at.width;
@@ -695,9 +728,31 @@ static void x11_opaque_region (bw_win *win, int x, int y, int width, int height)
                      (unsigned char *) opaque, 4);
 }
 
+/*
+ * A 32-bit window's pixels are read as premultiplied, the same as the Wayland
+ * raster is, so the alpha has to be multiplied through here too - straight
+ * through, the same drag icon came out brighter on one session than the other.
+ */
+static unsigned long argb_of (bw_win *win, unsigned long c)
+{
+    unsigned long a, r, g, b;
+
+    if (!(win->flags & BW_ARGB))
+    {
+        return c;
+    }
+    a = (c >> 24) & 0xff;
+    r = ((c >> 16) & 0xff) * a / 255;
+    g = ((c >> 8) & 0xff) * a / 255;
+    b = (c & 0xff) * a / 255;
+
+    return (a << 24) | (r << 16) | (g << 8) | b;
+}
+
 static void x11_background_colour (bw_win *win, unsigned long colour)
 {
-    XSetWindowBackground (d, ((x11_win *) win->impl)->xid, colour);
+    XSetWindowBackground (d, ((x11_win *) win->impl)->xid,
+                          argb_of (win, colour));
 }
 
 static void x11_set_background (bw_win *win, bw_win *canvas)
@@ -718,7 +773,7 @@ static void x11_fill (bw_win *win, unsigned long c, int x, int y,
 {
     x11_win *xw = win->impl;
 
-    XSetForeground (d, xw->gc, c);
+    XSetForeground (d, xw->gc, argb_of (win, c));
     XFillRectangle (d, target_of (win), xw->gc, x, y,
                     (unsigned) width, (unsigned) height);
 }
@@ -728,7 +783,7 @@ static void x11_rect (bw_win *win, unsigned long c, int x, int y,
 {
     x11_win *xw = win->impl;
 
-    XSetForeground (d, xw->gc, c);
+    XSetForeground (d, xw->gc, argb_of (win, c));
     XDrawRectangle (d, target_of (win), xw->gc, x, y,
                     (unsigned) width, (unsigned) height);
 }
@@ -748,7 +803,7 @@ static void x11_poly (bw_win *win, unsigned long c, const bw_point *p, int n)
         pts[i].x = (short) p[i].x;
         pts[i].y = (short) p[i].y;
     }
-    XSetForeground (d, xw->gc, c);
+    XSetForeground (d, xw->gc, argb_of (win, c));
     XFillPolygon (d, target_of (win), xw->gc, pts, n, Convex, CoordModeOrigin);
 }
 
@@ -756,7 +811,7 @@ static void x11_text (bw_win *win, unsigned long c, int x, int y, const char *s)
 {
     x11_win *xw = win->impl;
 
-    XSetForeground (d, xw->gc, c);
+    XSetForeground (d, xw->gc, argb_of (win, c));
     XDrawString (d, target_of (win), xw->gc, x, y, s, (int) strlen (s));
 }
 

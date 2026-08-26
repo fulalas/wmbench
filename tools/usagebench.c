@@ -43,6 +43,9 @@
  */
 #define SAFE    120
 
+/* Kept between anything this program grows and the edge of the stage */
+#define EDGE     40
+
 #define LINEH   22
 #define DOCLINES 200
 #define SBW     24
@@ -208,16 +211,16 @@ static int time_up (void)
 static int scene_wrong;
 
 /*
- * On Wayland a state is granted or it is not, and the compositor says which
- * in its own configure events; asked for and never granted has to be caught,
- * or the phase measures a window that sat still. On X11 the moves themselves
- * are watched instead, the way they always were.
+ * Asked for and never granted has to be caught, or the phase measures a window
+ * that sat still. Both sessions say which states a window is in - Wayland in
+ * its configure events, X11 on the window itself - and this phase is nothing
+ * but states, so neither is taken on trust.
  */
 static void expect_state (bw_win *w, unsigned mask, int on, const char *what)
 {
     int i;
 
-    if (!bw_is_wayland () || time_up ())
+    if (time_up ())
     {
         return;
     }
@@ -237,74 +240,6 @@ static void expect_state (bw_win *w, unsigned mask, int on, const char *what)
         fflush (stdout);
     }
     state_wrong = 1;
-}
-
-/* Back to a known place and size, whatever the last phase left behind */
-static void reset_window (bw_win *w, int x, int y)
-{
-    if (time_up ())
-    {
-        return;
-    }
-    bw_maximize (w, 0);
-    bw_fullscreen (w, 0);
-    bench_move (w, x, y, winw, winh);
-    step ();
-}
-
-/*
- * Walk the window in steps, the way a drag carries it, until its centre sits
- * on the given point - the middle of an edge, or a corner - the way a person
- * drags to tile. Then snap it to the given rectangle, what edge or corner
- * tiling leaves behind. Plain moves, so it is identical under every WM. On
- * Wayland nothing moves a managed toplevel, so the walk collapses and the
- * snap is the client resizing itself to the tile's size, which is the half
- * of the job a client is allowed.
- */
-static void walk_and_snap (bw_win *w, int cx, int cy,
-                           int tx, int ty, int tw, int th)
-{
-    int x0, y0, gw, gh, wx, wy, i;
-
-    if (time_up ())
-    {
-        return;
-    }
-    if (bw_win_placed (w))
-    {
-        bw_where (w, &x0, &y0, &gw, &gh);
-        wx = cx - gw / 2;
-        wy = cy - gh / 2;
-        for (i = 1; i <= 12; i++)
-        {
-            bench_move (w, x0 + (wx - x0) * i / 12, y0 + (wy - y0) * i / 12, 0, 0);
-            bw_sync ();
-            usleep (20000);
-        }
-    }
-    else
-    {
-        /*
-         * Nothing a client says moves a managed toplevel, so the walk is
-         * carried by the size instead. Dropping it outright left the Wayland
-         * pass a hundred-odd composited steps lighter than the X11 one it is
-         * compared with.
-         */
-        bw_where (w, NULL, NULL, &gw, &gh);
-        for (i = 1; i <= 12; i++)
-        {
-            bw_resize (w, gw + (tw - gw) * i / 12, gh + (th - gh) * i / 12);
-            bw_sync ();
-            usleep (20000);
-        }
-    }
-    bench_move (w, tx, ty, tw, th);
-    step ();
-    /*
-     * Where it really went. A compositor can take every one of these and act
-     * on none of them, and then the phase measured a window sitting still.
-     */
-    bench_watch (w);
 }
 
 /*
@@ -579,10 +514,13 @@ static void resize_phase (int bx, int by)
 {
     int gw = winw + 600, gh = winh + 400, tx, ty;
 
-
-    /* Grow only as far as the stage allows, frame and panels included */
-    if (bx + gw > stage_x + stage_w) gw = stage_x + stage_w - bx;
-    if (by + gh > stage_y + stage_h) gh = stage_y + stage_h - by;
+    /*
+     * Grown to inside the stage, never up to its edge: a window whose corner
+     * sits exactly on the boundary reads as one that ran out of screen, and
+     * leaves a frame or a shadow nowhere to go.
+     */
+    if (bx + gw > stage_x + stage_w - EDGE) gw = stage_x + stage_w - EDGE - bx;
+    if (by + gh > stage_y + stage_h - EDGE) gh = stage_y + stage_h - EDGE - by;
 
     drag_resize (bx, by, winw, winh, bx, by, gw, gh, 60);
     checkpoint ("resize-corner", bx, by, gw, gh);
@@ -601,13 +539,14 @@ static void resize_phase (int bx, int by)
 
     /*
      * The top-left corner, which moves the window as it grows. The
-     * bottom-right stays where it is and the target is clamped to the screen,
-     * so no window manager has to decide what to do with an edge that left.
+     * bottom-right stays where it is, and the target stops inside the stage:
+     * clamped to the screen instead it left the stage on a screen wider than
+     * one, and then the phase covered ground no 1080p run can cover.
      */
     tx = bx - 500;
     ty = by - 140;
-    if (tx < SAFE) tx = SAFE;
-    if (ty < SAFE) ty = SAFE;
+    if (tx < stage_x + EDGE) tx = stage_x + EDGE;
+    if (ty < stage_y + EDGE) ty = stage_y + EDGE;
     drag_resize (bx, by, winw, winh,
                  tx, ty, winw + (bx - tx), winh + (by - ty), 60);
     checkpoint ("resize-topleft", tx, ty, winw + (bx - tx), winh + (by - ty));
@@ -669,26 +608,48 @@ static void hide_carrier (bw_win *c)
     usleep ((useconds_t) ((ms != NULL ? atoi (ms) : 250) * 1000));
 }
 
+/*
+ * A drag icon is a surface of the window's own, and a surface that leaves its
+ * window is not clipped by every session: on one it flew over the desktop.
+ * Held inside instead, so the scene is the window's own wherever it runs.
+ */
+static void carry_to (bw_win *c, int x, int y, int w, int h)
+{
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x > w - (ICON + 2)) x = w - (ICON + 2);
+    if (y > h - (ICON + 2)) y = h - (ICON + 2);
+    bw_move_raw (c, x, y, 0, 0, 1);
+}
+
 static void icon_cell (int i, int *cx, int *cy)
 {
     *cx = 40 + (i % COLS) * CELL;
     *cy = 60 + (i / COLS) * (CELL + 30);
 }
 
-/* One icon: a sheet with a folded corner and a label bar under it */
-static void draw_icon (bw_win *t, int x, int y, int i)
+/*
+ * A sheet with a folded corner and a label bar under it. The alpha rides in
+ * the colour: a drag icon is translucent, and per-pixel is the only way that
+ * survives on both sessions - whole-window opacity is granted to a toplevel,
+ * and a drag icon here is not one.
+ */
+static void draw_icon (bw_win *t, int x, int y, int i, unsigned long a)
 {
     bw_point fold[3];
 
-    bw_fill (t, palette[i % NCOL], x, y, ICON, ICON);
+    bw_fill (t, a | palette[i % NCOL], x, y, ICON, ICON);
     fold[0].x = x + ICON - 22; fold[0].y = y;
     fold[1].x = x + ICON;      fold[1].y = y;
     fold[2].x = x + ICON;      fold[2].y = y + 22;
-    bw_poly (t, 0xffffff, fold, 3);
-    bw_rect (t, 0x303030, x, y, ICON, ICON);
-    bw_fill (t, 0x303030, x + 8, y + ICON + 8, ICON - 16, 6);
+    bw_poly (t, a | 0xffffff, fold, 3);
+    bw_rect (t, a | 0x303030, x, y, ICON, ICON);
+    bw_fill (t, a | 0x303030, x + 8, y + ICON + 8, ICON - 16, 6);
     bw_present (t);
 }
+
+#define ICON_SOLID 0xff000000ul
+#define ICON_DRAG  0xbf000000ul
 
 /* The two icon views: what is still here, what has been dropped, and whether
  * a drag is hovering over this one */
@@ -711,7 +672,7 @@ static void draw_view (bw_win *w, const char *title, const int *have,
         icon_cell (i, &cx, &cy);
         if (have[i] >= 0)
         {
-            draw_icon (w, cx, cy, have[i]);
+            draw_icon (w, cx, cy, have[i], ICON_SOLID);
         }
         else
         {
@@ -723,24 +684,41 @@ static void draw_view (bw_win *w, const char *title, const int *have,
 }
 
 /*
- * Icons dragged from one window into another. What the compositor sees is a
- * small frameless translucent window travelling over another window, which is
- * exactly what a drag is; the last leg carries four of them at once.
+ * Icons dragged from one view into another. What the compositor sees is a
+ * small translucent surface travelling over other surfaces, which is exactly
+ * what a drag is; the last leg carries four of them at once.
  *
- * The views have to sit at known spots for the flights to make sense. On
- * X11 that is wa and wb moved side by side; on Wayland a managed toplevel
- * sits wherever the compositor put it, so the phase plays out on two
- * layer-shell windows of its own - and where there is no layer-shell the
- * scene cannot be built and the phase says not done.
+ * The whole scene is one window with its views and its drag icons inside it,
+ * so every coordinate here is that window's and none is the screen's. Asking
+ * for screen coordinates instead would leave the phase undone wherever a
+ * session places nothing, and the flights are the same either way.
  */
+/* Everything the phase opened, and the sizes the other phases expect */
+static void dnd_done (bw_win *host, bw_win *va, bw_win *vb, int wide, int tall)
+{
+    int i;
+
+    for (i = 0; i < 4; i++)
+    {
+        bw_destroy (carrier[i]);
+        carrier[i] = NULL;
+    }
+    bw_destroy (va);
+    bw_destroy (vb);
+    bw_destroy (host);
+    winw = wide;
+    winh = tall;
+}
+
 static void dnd_phase (int bx, int by)
 {
-    bw_win *va, *vb;
+    bw_win *host, *va, *vb;
+    const int home_y = by;      /* by is reused below as the host's own origin */
     int home[NICON], album[NICON];
     int order[4] = { 0, 3, 5, 6 };
     int k, f, i, cx, cy, tx, ty, x, y, nalbum = 0;
-    int wide = winw;
-    int lx, rx;
+    int wide = winw, tall = winh;
+    int lx, rx, hostw, hosth, hostx, hx0 = 0, hy0 = 0;
     char ckname[32];
 
     /*
@@ -759,55 +737,93 @@ static void dnd_phase (int bx, int by)
             winw = DNDMINW;
         }
     }
-    lx = stage_x;
-    rx = stage_x + stage_w - winw;
+    hostw = 2 * winw + DNDGAP;
+    if (hostw > stage_w - 2 * EDGE)
+    {
+        hostw = stage_w - 2 * EDGE;
+    }
+    hosth = winh;
+    /* Centred on its own width, not on the pair's: it is nearly the whole
+       stage wide, and at the pair's place most of it would be off a 1080p
+       screen - which is the screen everything here is sized for */
+    hostx = stage_x + (stage_w - hostw) / 2;
     for (i = 0; i < NICON; i++)
     {
         home[i] = i;
         album[i] = -1;
     }
 
+    if (wa != NULL)
+    {
+        bw_unmap (wa);
+        bw_unmap (wb);
+    }
+    host = bw_create (NULL, hostx, by, hostw, hosth, "usagebench drop",
+                      BW_KEEP);
+    if (host == NULL)
+    {
+        scene_wrong = 1;
+        winw = wide;
+        winh = tall;
+
+        return;
+    }
+    bw_map (host);
+    bw_sync ();
+    usleep (300000);
     /*
-     * The managed windows step aside and the drag plays out on two windows
-     * this program places itself, on either session: a managed Wayland
-     * toplevel cannot be put side by side with another at all, and doing it
-     * one way here and another way there would drag icons across two
-     * different scenes.
+     * The size it really got, which a session that tiles decides for itself.
+     * The views are laid out inside that rather than inside what was asked
+     * for, or half of one would hang outside the window it lives in.
      */
-    bw_unmap (wa);
-    bw_unmap (wb);
-    va = bw_create (NULL, lx, by, winw, winh, "usagebench A",
-                    BW_PLACED | BW_KEEP | BW_UNMANAGED);
-    vb = bw_create (NULL, rx, by, winw, winh, "usagebench B",
-                    BW_PLACED | BW_KEEP | BW_UNMANAGED);
+    bw_where (host, &hx0, &hy0, &hostw, &hosth);
+    /* What shows between the two views. Left undrawn it is bare surface, and
+       what that looks like is the session's own business, not this scene's */
+    bw_fill (host, 0x606060, 0, 0, hostw, hosth);
+    bw_present (host);
+    winw = (hostw - DNDGAP) / 2;
+    if (winw < DNDMINW)
+    {
+        winw = DNDMINW;
+    }
+    winh = hosth;
+    /* Inside the window that holds them, so the flights need no screen
+       coordinates and nothing has to have granted a position */
+    lx = 0;
+    rx = hostw - winw;
+    by = 0;
+    va = bw_create (host, lx, by, winw, winh, NULL, BW_CHILD | BW_KEEP);
+    vb = bw_create (host, rx, by, winw, winh, NULL, BW_CHILD | BW_KEEP);
+    /*
+     * The drag icons: translucent the way a drag icon is, so the compositor
+     * has to blend one as it moves, and told about their own map and unmap so
+     * a drag never starts before the last one has finished.
+     */
+    for (i = 0; i < 4; i++)
+    {
+        carrier[i] = bw_create (host, 0, 0, ICON + 2, ICON + 2, NULL,
+                                BW_CHILD | BW_ARGB | BW_NOTIFY);
+        if (carrier[i] != NULL)
+        {
+            bw_background_colour (carrier[i], ICON_DRAG | 0xf0f0f0);
+        }
+    }
+    for (i = 0; i < 4; i++)
+    {
+        if (carrier[i] == NULL)
+        {
+            va = NULL;          /* one missing is no drag to composite */
+        }
+    }
     if (va == NULL || vb == NULL)
     {
         scene_wrong = 1;
+        dnd_done (host, va, vb, wide, tall);
 
         return;
     }
     bw_map (va);
     bw_map (vb);
-    bw_sync ();
-    usleep (300000);
-    /*
-     * The two views have to be side by side. Where they are is the question
-     * here, not whether they moved: dragging icons into a window hidden
-     * behind the one they left is not what this measures, however the two of
-     * them came to be stacked that way.
-     */
-    /* This phase runs after MEASURE-START, and the screenshot that proves a
-       believed position costs about 0.3 s that would land in the numbers */
-    bench_prove_places (0);
-    if (!bench_placed (va, lx, by, "usagebench A"))
-    {
-        scene_wrong = 1;
-    }
-    if (!bench_placed (vb, rx, by, "usagebench B"))
-    {
-        scene_wrong = 1;
-    }
-    bench_prove_places (1);
     bw_sync ();
     usleep (300000);
     draw_view (va, "Pictures", home, NICON, 0);
@@ -828,15 +844,14 @@ static void dnd_phase (int bx, int by)
      * cycling keeps the one window and shows every drag.
      */
     icon_cell (order[0], &cx, &cy);
-    /* A session that places the views but cannot show a carrier - zones
-       without layer-shell - has no drag to composite, and that is the
-       phase, not a detail of it */
+    /* A session that cannot show a drag icon has no drag to composite, and
+       that is the phase, not a detail of it */
     if (!bw_win_placed (carrier[0]))
     {
         scene_wrong = 1;
     }
     show_carrier (carrier[0], lx + cx, by + cy);
-    draw_icon (carrier[0], 1, 1, order[0]);
+    draw_icon (carrier[0], 1, 1, order[0], ICON_DRAG);
     bw_sync ();
 
     for (k = 0; k < 4 && !time_up (); k++)
@@ -851,7 +866,7 @@ static void dnd_phase (int bx, int by)
         bw_sync ();
         usleep (150000);
         snprintf (ckname, sizeof ckname, "dnd-lift-%d", k + 1);
-        checkpoint_of (va, ckname, lx, by, winw, winh);
+        checkpoint_of (host, ckname, hx0, hy0, hostw, winh);
 
         for (f = 1; f <= 55 && !time_up (); f++)
         {
@@ -860,8 +875,8 @@ static void dnd_phase (int bx, int by)
             x = (int) ((lx + cx) + ((rx + tx) - (lx + cx)) * t);
             y = (int) ((by + cy) + ((by + ty) - (by + cy)) * t
                        - 90.0 * t * (1.0 - t) * 4.0);
-            bw_move_raw (carrier[0], x, y, 0, 0, 1);
-            draw_icon (carrier[0], 1, 1, i);
+            carry_to (carrier[0], x, y, hostw, hosth);
+            draw_icon (carrier[0], 1, 1, i, ICON_DRAG);
             if (f == 28)
             {
                 draw_view (vb, "Album", album, nalbum, 1);
@@ -881,19 +896,19 @@ static void dnd_phase (int bx, int by)
         if (k + 1 < 4)
         {
             icon_cell (order[k + 1], &cx, &cy);
-            bw_move_raw (carrier[0], lx + cx, by + cy, 0, 0, 1);
-            draw_icon (carrier[0], 1, 1, order[k + 1]);
+            carry_to (carrier[0], lx + cx, by + cy, hostw, hosth);
+            draw_icon (carrier[0], 1, 1, order[k + 1], ICON_DRAG);
         }
         else
         {
             icon_cell (0, &cx, &cy);
-            bw_move_raw (carrier[0], rx + cx, by + cy, 0, 0, 1);
-            draw_icon (carrier[0], 1, 1, order[0]);
+            carry_to (carrier[0], rx + cx, by + cy, hostw, hosth);
+            draw_icon (carrier[0], 1, 1, order[0], ICON_DRAG);
         }
         bw_sync ();
         step ();
         snprintf (ckname, sizeof ckname, "dnd-drop-%d", k + 1);
-        checkpoint_of (vb, ckname, rx, by, winw, winh);
+        checkpoint_of (host, ckname, hx0, hy0, hostw, winh);
     }
 
     /* All four home again at once: four carriers travelling together */
@@ -912,7 +927,7 @@ static void dnd_phase (int bx, int by)
         {
             icon_cell (k, &cx, &cy);
             show_carrier (carrier[k], rx + cx, by + cy);
-            draw_icon (carrier[k], 1, 1, order[k]);
+            draw_icon (carrier[k], 1, 1, order[k], ICON_DRAG);
         }
         bw_sync ();
         usleep (200000);
@@ -927,9 +942,9 @@ static void dnd_phase (int bx, int by)
         for (k = 0; k < 4; k++)
         {
             icon_cell (k, &cx, &cy);
-            bw_move_raw (carrier[k], ax + (rx + cx - ax), ay + (by + cy - ay),
-                         0, 0, 1);
-            draw_icon (carrier[k], 1, 1, order[k]);
+            carry_to (carrier[k], ax + (rx + cx - ax), ay + (by + cy - ay),
+                      hostw, hosth);
+            draw_icon (carrier[k], 1, 1, order[k], ICON_DRAG);
         }
         bw_sync ();
         usleep (300000);
@@ -942,8 +957,8 @@ static void dnd_phase (int bx, int by)
             y = (int) (ay + (hy - ay) * t - 90.0 * t * (1.0 - t) * 4.0);
             for (k = 0; k < 4; k++)
             {
-                bw_move_raw (carrier[k], x + k * 14, y + k * 10, 0, 0, 1);
-                draw_icon (carrier[k], 1, 1, order[k]);
+                carry_to (carrier[k], x + k * 14, y + k * 10, hostw, hosth);
+                draw_icon (carrier[k], 1, 1, order[k], ICON_DRAG);
             }
             if (f == 28)
             {
@@ -965,20 +980,20 @@ static void dnd_phase (int bx, int by)
             hide_carrier (carrier[k]);
         }
         step ();
-        checkpoint_of (va, "dnd-all-back", lx, by, winw, winh);
+        checkpoint_of (host, "dnd-all-back", hx0, hy0, hostw, winh);
     }
 
-    /* Put the two windows back at the width and place the other phases expect */
-    winw = wide;
-    bw_destroy (va);
-    bw_destroy (vb);
-    bw_map (wa);
-    bw_map (wb);
-    bench_move (wb, stage_x + (stage_w - winw) / 2 + 80, stage_y + 40,
-              winw, winh);
-    bench_move (wa, bx, by, winw, winh);
-    draw_content (wa, 0);
-    draw_content (wb, 3 * BAND);
+    dnd_done (host, va, vb, wide, tall);
+    if (wa != NULL)
+    {
+        bw_map (wa);
+        bw_map (wb);
+        bench_move (wb, stage_x + (stage_w - winw) / 2 + 80, stage_y + 40,
+                    winw, winh);
+        bench_move (wa, bx, home_y, winw, winh);
+        draw_content (wa, 0);
+        draw_content (wb, 3 * BAND);
+    }
     bw_sync ();
     step ();
 }
@@ -1135,23 +1150,17 @@ int main (int argc, char **argv)
     }
     base_x = stage_x + (stage_w - winw) / 2;
 
-    /* A phase of its own opens the kind it needs; a whole pass opens the
-       placed pair and the windows phase swaps it out and back */
-    pair_kind (strcmp (phase, "windows") == 0);
-    doc_buf = bw_canvas (winw, winh);
-
     /*
-     * The drag carriers: no frame, and translucent the way a drag icon is, so
-     * the compositor has to blend one as it moves. Told about their own map
-     * and unmap, so a drag never starts before the last one has finished.
+     * A phase of its own opens the kind it needs; a whole pass opens the
+     * placed pair and the windows phase swaps it out and back. The drop phase
+     * brings its own window and never touches the pair, so opening one there
+     * would put another phase's pattern on screen before its own scene.
      */
-    for (i = 0; i < 4; i++)
+    if (want_phase ("windows") || want_phase ("scroll") || want_phase ("resize"))
     {
-        carrier[i] = bw_create (NULL, 0, 0, ICON + 2, ICON + 2, NULL,
-                                BW_POPUP | BW_NOTIFY);
-        bw_background_colour (carrier[i], 0xf0f0f0);
-        bw_opacity (carrier[i], 0.75);
+        pair_kind (strcmp (phase, "windows") == 0);
     }
+    doc_buf = bw_canvas (winw, winh);
 
     bw_sync ();
     sleep (2);
@@ -1159,7 +1168,7 @@ int main (int argc, char **argv)
     /* Which way of moving a window this session honours. See lib/place.c.
        A managed Wayland toplevel takes no moves at all, only states and
        sizes, so there is nothing to probe against one. */
-    if (bw_win_placed (wa))
+    if (wa != NULL && bw_win_placed (wa))
     {
         int way = bench_probe_move (wa, base_x, base_y, winw, winh);
 
@@ -1176,7 +1185,7 @@ int main (int argc, char **argv)
             fflush (manifest);
         }
     }
-    else if (manifest != NULL)
+    else if (manifest != NULL && wa != NULL)
     {
         fprintf (manifest, "-- moves: states and client sizes (wayland)\n");
         fflush (manifest);
@@ -1188,11 +1197,14 @@ int main (int argc, char **argv)
      * is undefined, and undefined is not the same thing twice: one left the
      * old pixels in the corner where others left black.
      */
-    bands_ready ();
-    draw_content (wa, 0);
-    draw_content (wb, 3 * BAND);
-    bw_sync ();
-    sleep (1);
+    if (wa != NULL)
+    {
+        bands_ready ();
+        draw_content (wa, 0);
+        draw_content (wb, 3 * BAND);
+        bw_sync ();
+        sleep (1);
+    }
 
     tasks = bench_tasks ();
     /*
@@ -1227,7 +1239,7 @@ int main (int argc, char **argv)
         }
         pair_kind (1);
 
-        for (i = 0; i < 2 && (fixed || bench_now () - start < seconds); i++)
+        for (i = 0; i < 6 && (fixed || bench_now () - start < seconds); i++)
         {
             bw_maximize (wa, 1);
             step ();
@@ -1237,33 +1249,7 @@ int main (int argc, char **argv)
             expect_state (wa, BW_STATE_MAX, 0, "unmaximize");
         }
 
-        /* To the middle of each side edge, snapped to half the screen */
-        walk_and_snap (wa, 0, sh / 2, 0, 0, sw / 2, sh);
-        checkpoint ("side-left", 0, 0, sw / 2, sh);
-        reset_window (wa, base_x, base_y);
-        walk_and_snap (wa, sw, sh / 2, sw / 2, 0, sw / 2, sh);
-        checkpoint ("side-right", sw / 2, 0, sw / 2, sh);
-        reset_window (wa, base_x, base_y);
-
-        /* Centred on each corner, a quarter each, clockwise then back */
-        walk_and_snap (wa, 0, 0, 0, 0, sw / 2, sh / 2);
-        checkpoint ("cw-tl", 0, 0, sw / 2, sh / 2);
-        walk_and_snap (wa, sw, 0, sw / 2, 0, sw / 2, sh / 2);
-        checkpoint ("cw-tr", sw / 2, 0, sw / 2, sh / 2);
-        walk_and_snap (wa, sw, sh, sw / 2, sh / 2, sw / 2, sh / 2);
-        checkpoint ("cw-br", sw / 2, sh / 2, sw / 2, sh / 2);
-        walk_and_snap (wa, 0, sh, 0, sh / 2, sw / 2, sh / 2);
-        checkpoint ("cw-bl", 0, sh / 2, sw / 2, sh / 2);
-        reset_window (wa, base_x, base_y);
-        walk_and_snap (wa, 0, sh, 0, sh / 2, sw / 2, sh / 2);
-        checkpoint ("ccw-bl", 0, sh / 2, sw / 2, sh / 2);
-        walk_and_snap (wa, sw, sh, sw / 2, sh / 2, sw / 2, sh / 2);
-        checkpoint ("ccw-br", sw / 2, sh / 2, sw / 2, sh / 2);
-        walk_and_snap (wa, sw, 0, sw / 2, 0, sw / 2, sh / 2);
-        checkpoint ("ccw-tr", sw / 2, 0, sw / 2, sh / 2);
-        walk_and_snap (wa, 0, 0, 0, 0, sw / 2, sh / 2);
-        checkpoint ("ccw-tl", 0, 0, sw / 2, sh / 2);
-        reset_window (wa, base_x, base_y);
+        checkpoint ("maximize", base_x, base_y, winw, winh);
       }
 
       if (want_phase ("scroll"))
@@ -1312,7 +1298,8 @@ int main (int argc, char **argv)
 
       if (want_phase ("dnd"))
       {
-        pair_kind (0);
+        /* No pair: the phase opens the one window it needs, and the pattern
+           the others carry has no business being on screen before it */
         dnd_phase (base_x, base_y);
       }
 
@@ -1321,7 +1308,7 @@ int main (int argc, char **argv)
         pair_kind (1);
 
         /* Two windows raised over each other, the way alt-tab lands */
-        for (i = 0; i < 3 && (fixed || bench_now () - start < seconds); i++)
+        for (i = 0; i < 9 && (fixed || bench_now () - start < seconds); i++)
         {
             bw_raise (wb);
             step ();
@@ -1329,12 +1316,21 @@ int main (int argc, char **argv)
             step ();
         }
 
-        bw_fullscreen (wa, 1);
-        step ();
-        expect_state (wa, BW_STATE_FULLSCREEN, 1, "fullscreen");
-        bw_fullscreen (wa, 0);
-        step ();
-        expect_state (wa, BW_STATE_FULLSCREEN, 0, "leaving fullscreen");
+        /*
+         * The counts are what makes the row long enough to read a power figure
+         * from. A pass of its own would do it too, but the pass after the
+         * first has to open the pair again - its window was left minimized -
+         * and that setup would land inside the measurement.
+         */
+        for (i = 0; i < 3 && (fixed || bench_now () - start < seconds); i++)
+        {
+            bw_fullscreen (wa, 1);
+            step ();
+            expect_state (wa, BW_STATE_FULLSCREEN, 1, "fullscreen");
+            bw_fullscreen (wa, 0);
+            step ();
+            expect_state (wa, BW_STATE_FULLSCREEN, 0, "leaving fullscreen");
+        }
 
         /* Last of the phase, and left minimized: bringing one back is refused
            where no protocol lets a client ask, and a pass that ends here is one
@@ -1353,10 +1349,6 @@ int main (int argc, char **argv)
     printf ("AVERAGE %.1f actions/s over %.1f s, %d actions\n",
             actions / (bench_now () - start), bench_now () - start, actions);
 
-    for (i = 0; i < 4; i++)
-    {
-        bw_destroy (carrier[i]);
-    }
     if (bands_buf != NULL)
     {
         bw_destroy (bands_buf);
@@ -1365,8 +1357,6 @@ int main (int argc, char **argv)
     {
         bw_destroy (bands_buf_b);
     }
-    int on_wayland = bw_is_wayland ();
-
     bw_destroy (doc_buf);
     bw_destroy (wa);
     bw_destroy (wb);
@@ -1382,12 +1372,8 @@ int main (int argc, char **argv)
      * compositor's configure events instead: a state asked for and never
      * granted is the window that sat still.
      */
-    if (want_phase ("windows") &&
-        (on_wayland ? state_wrong : !bench_moved ()))
+    if (want_phase ("windows") && state_wrong)
     {
-        printf ("MOVE-NEVER-HAPPENED the window stayed where it was\n");
-        fflush (stdout);
-
         return 3;
     }
     if (want_phase ("dnd") && scene_wrong)

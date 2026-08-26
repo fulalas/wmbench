@@ -49,22 +49,28 @@ Some Wayland rows measure a differently-shaped ask:
 - **move** travels a layer surface by its own margins: real compositing, but no
   frame being moved. A screenshot proves it before and after the measurement,
   never inside; without a screenshot tool the row says its moves are unproven.
-- **windows** walks the same states through xdg-shell, checked against the
-  compositor's configure events. Zones make the walks real moves; elsewhere
-  nothing a client says moves a managed toplevel, so the twelve steps to each
-  edge are carried by the size instead - the same count of composited steps.
-  It minimizes last and leaves the window minimized: bringing one back is
-  refused by KWin and mutter, so ending there is what lets every desktop run
-  the same test. Results from before this do not compare on that row.
+- **windows** walks states through xdg-shell, checked against the compositor's
+  configure events, and nothing else: it used to walk the window to each screen
+  edge and snap it there, which no client can ask a Wayland compositor for, so
+  the walk was carried by resizing - the resize test over again. It minimizes
+  last and leaves the window minimized, because bringing one back is refused
+  where no protocol lets a client ask. Results from before this do not compare
+  on that row.
 - **zone placement** reports positions back, so those rows need no screenshot.
   It deliberately will not say where a window sits on screen, so pixel checks
   never aim at one.
-- **resize, scroll and dnd** place their own two windows, undecorated, on X11
-  too. Nothing else gives both sessions one scene: a Wayland compositor puts a
-  managed window where it likes, and labwc put both in the same spot, covering
+- **resize and scroll** place their own two windows, undecorated, on X11 too.
+  Nothing else gives both sessions one scene: a Wayland compositor puts a
+  managed window where it likes, and one put both in the same spot, covering
   one whole. The cost is no frame around them, and results from before this do
   not compare. **windows** keeps its managed pair, because states belong to
   one, so it is the one scene the two sessions still differ on.
+- **dnd** is one window with both views and the drag icons inside it, placed
+  by the parent's coordinates: subsurfaces on Wayland, and on X11 windows of
+  their own at the parent's corner plus the offset. The compositor still
+  composites a small translucent surface travelling over others, which is what
+  a drag is, but nothing has to grant a screen position - so the row runs where
+  windows cannot be placed at all.
 - **transbench** sets `_NET_WM_WINDOW_OPACITY` blind on X11; on Wayland a
   compositor without alpha-modifier answers no and the row is "not done".
 - **fullscreen asked** sets `_NET_WM_BYPASS_COMPOSITOR` on X11; Wayland has no
@@ -87,7 +93,7 @@ step aside - is read in power, not frames, because the saving is the
 compositor's work and not the application's.
 
 No workload repeats another: the scripted person is split into `windows`
-(maximize, snap, raise, fullscreen, minimize) and `scroll`, beside `resize` and
+(maximize, raise, fullscreen, minimize - states only), `scroll`, `resize` and
 `dnd`.
 
 Every load says where its windows landed, and the moving tests check they

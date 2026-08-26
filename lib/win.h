@@ -33,6 +33,13 @@ typedef struct { int x, y; } bw_point;
    and place a window, so the tests that need their own coordinates go
    unmanaged on both sides rather than measuring two different scenes */
 #define BW_UNMANAGED 2048u
+/* Put where the parent is rather than where the screen is: x and y are the
+   parent's coordinates, so nothing has to know where on screen the parent
+   went, which is the only way a session that places nothing can be asked for
+   a position at all. A subsurface on Wayland; on X11 a window of its own at
+   the parent's corner plus the offset, because a real child window is cleared
+   to its background wherever a moving sibling leaves it */
+#define BW_CHILD 4096u
 
 #define BW_STATE_MAX         1u
 #define BW_STATE_FULLSCREEN  2u
