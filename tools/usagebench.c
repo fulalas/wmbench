@@ -74,6 +74,7 @@
  */
 static int winw = WINW, winh = WINH;
 static int stage_x, stage_y, stage_w, stage_h;
+static int base_x, base_y;      /* where the pair opens, reopened at the same spot */
 static bw_win *wa, *wb, *carrier[4];
 static int sw, sh, actions = 0;
 static bw_win *doc_buf;         /* the document is drawn here, copied once */
@@ -1013,23 +1014,22 @@ static void dnd_phase (int bx, int by)
     step ();
 }
 
-static bw_win *make_window (int x, int y, const char *name)
+/*
+ * The windows phase walks states that belong to a managed toplevel and to
+ * nothing else, so its windows stay managed, and on Wayland they must never
+ * land on a layer surface however placeable those are.
+ *
+ * Every other phase needs its own coordinates, and asking a manager for them
+ * is not enough: labwc put both windows in one place and the second was never
+ * seen at all, so those runs composited one window where the X11 runs
+ * composited two. They go unmanaged on both sides instead, which is the one
+ * scene rather than two that look alike.
+ */
+static bw_win *make_window (int x, int y, const char *name, int stated)
 {
     unsigned flags = BW_NOTIFY | BW_KEEP | BW_PLACED;
-    int stated = strcmp (phase, "windows") == 0 || strcmp (phase, "all") == 0;
     bw_win *w;
 
-    /*
-     * The windows phase walks states that belong to a managed toplevel and to
-     * nothing else, so there the window stays managed, and on Wayland it must
-     * never land on a layer surface however placeable those are.
-     *
-     * Every other phase needs its own coordinates, and asking a manager for
-     * them is not enough: labwc put both windows in one place and the second
-     * was never seen at all, so those runs composited one window where the
-     * X11 runs composited two. They go unmanaged on both sides instead, which
-     * is the one scene rather than two that look alike.
-     */
     if (stated)
     {
         if (bw_is_wayland ())
@@ -1047,11 +1047,46 @@ static bw_win *make_window (int x, int y, const char *name)
     return w;
 }
 
+/*
+ * Which kind the pair is right now. A whole pass runs every phase in turn, so
+ * the kind cannot be settled once at the start: the windows phase needs the
+ * managed pair and the rest need the placed one. Opened once for the kind they
+ * need, the phases either side of it ran a different scene from the same
+ * phases run on their own, and the validator and the benchmark stopped
+ * measuring the same thing.
+ */
+static int pair_stated = -1;
+
+static void pair_kind (int stated)
+{
+    if (pair_stated == stated)
+    {
+        return;
+    }
+    if (pair_stated >= 0)
+    {
+        bw_destroy (wa);
+        bw_destroy (wb);
+    }
+    pair_stated = stated;
+    wb = make_window (base_x + 80, stage_y + 40, "usagebench B", stated);
+    wa = make_window (base_x, base_y, "usagebench A", stated);
+    if (bands_buf != NULL)
+    {
+        /* New windows, so the pattern has to become their background again */
+        bw_set_background (wa, bands_buf);
+        bw_set_background (wb, bands_buf_b);
+        draw_content (wa, 0);
+        draw_content (wb, 3 * BAND);
+    }
+    bw_sync ();
+}
+
 int main (int argc, char **argv)
 {
     double seconds = (argc > 1) ? atof (argv[1]) : 30.0;
     double rate = (argc > 2) ? atof (argv[2]) : 3.0;
-    int i, base_x, base_y;
+    int i;
     long tasks, pass = 0;
     double start;
 
@@ -1120,8 +1155,9 @@ int main (int argc, char **argv)
     }
     base_x = stage_x + (stage_w - winw) / 2;
 
-    wb = make_window (base_x + 80, stage_y + 40, "usagebench B");
-    wa = make_window (base_x, base_y, "usagebench A");
+    /* A phase of its own opens the kind it needs; a whole pass opens the
+       placed pair and the windows phase swaps it out and back */
+    pair_kind (strcmp (phase, "windows") == 0);
     doc_buf = bw_canvas (winw, winh);
 
     /*
@@ -1191,6 +1227,8 @@ int main (int argc, char **argv)
     {
       if (want_phase ("windows"))
       {
+        pair_kind (1);
+
         /* Maximize and back */
         for (i = 0; i < 2 && (fixed || bench_now () - start < seconds); i++)
         {
@@ -1246,6 +1284,8 @@ int main (int argc, char **argv)
 
       if (want_phase ("scroll"))
       {
+        pair_kind (0);
+
         /*
          * Scrolling, the two ways a person does it. The window is back at its
          * plain size here, so the document fills it.
@@ -1282,16 +1322,20 @@ int main (int argc, char **argv)
 
       if (want_phase ("resize"))
       {
+        pair_kind (0);
         resize_phase (base_x, base_y);
       }
 
       if (want_phase ("dnd"))
       {
+        pair_kind (0);
         dnd_phase (base_x, base_y);
       }
 
       if (want_phase ("windows"))
       {
+        pair_kind (1);
+
         /* Two windows raised over each other, the way alt-tab lands */
         for (i = 0; i < 3 && (fixed || bench_now () - start < seconds); i++)
         {

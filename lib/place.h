@@ -3,6 +3,16 @@
 #include "win.h"
 
 /*
+ * The stress mix stacks its wide backgrounds on one another. They share this
+ * margin, and each one above the bottom stops STAGE_STRIP further in, so every
+ * one of them keeps a strip of its own on screen. A window covered whole is
+ * not composited at all on most compositors, and it cannot be found in a
+ * screenshot either.
+ */
+#define STAGE_MARGIN 60
+#define STAGE_STRIP  50
+
+/*
  * Say where a window was put against where it was asked to go. Prints one
  * "place:" line, and "PLACE-IGNORED" as well when it is nowhere near.
  * Returns 1 when the position was honoured.

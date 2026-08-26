@@ -63,6 +63,14 @@ Some Wayland rows measure a differently-shaped ask, said here once:
   a zone will not say is where it sits on the screen, deliberately, so the
   pixel checks never aim a capture through it; they use layer-shell or say
   "not available".
+- **resize, scroll and dnd** place their two windows themselves, undecorated,
+  on X11 as well as on Wayland. Nothing else gives the two sessions the same
+  scene: a Wayland compositor places a managed window where it likes, and
+  labwc put both in one place, leaving one of them covered whole. The cost is
+  that no manager frames those windows, so a session's own `windows` row is
+  the only one measured with a frame, and results from before this changed do
+  not compare. **windows** keeps its managed pair, because states belong to
+  one, and so it is the one scene the two sessions still do not share.
 - **transbench** is asymmetric by design: X11 sets `_NET_WM_WINDOW_OPACITY`
   blind and measures whatever the compositor makes of it, while on Wayland a
   compositor without alpha-modifier is asked, answers no, and the row is "not

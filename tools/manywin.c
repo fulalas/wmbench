@@ -175,12 +175,13 @@ int main (int argc, char **argv)
     {
         bw_destroy (wins[i]);
     }
-    for (i = 0; i < 6; i++)
+    for (i = 0; i < count; i++)
     {
         bw_destroy (pat[i]);
     }
     bw_close ();
     free (wins);
+    free (pat);
 
     return 0;
 }

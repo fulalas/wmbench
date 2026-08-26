@@ -425,6 +425,12 @@ int main (int argc, char **argv)
                 wh = nh;
                 bw_frame_size (wlwin, &fw, &fh);
                 wl_egl_window_resize (egl_win, fw, fh, 0, 0);
+                /* A region left at the old size is a claim about pixels the
+                   surface no longer has, and the compositor acts on it */
+                if (getenv ("BENCH_BYPASS") != NULL)
+                {
+                    bw_opaque_region (wlwin, 0, 0, ww, wh);
+                }
             }
         }
         else

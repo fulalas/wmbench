@@ -86,8 +86,10 @@ int main (int argc, char **argv)
         return 2;
     }
 
-    bw_stage (60, &sx, &sy, &bgw, &bgh);
-    bgw = MIN (BGW, bgw); bgh = MIN (BGH, bgh);
+    bw_stage (STAGE_MARGIN, &sx, &sy, &bgw, &bgh);
+    /* Two strips in from the stage edge: popbench's background takes the
+       first and fsbench, under both, keeps the last. See place.h */
+    bgw = MIN (BGW, bgw - 2 * STAGE_STRIP); bgh = MIN (BGH, bgh);
     fgw = MIN (FGW, bgw - 220); fgh = MIN (FGH, bgh - 220);
     bg = bw_create (NULL, sx, sy, bgw, bgh, "transbench background",
                     BW_PLACED | BW_UNMANAGED);

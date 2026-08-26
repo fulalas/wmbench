@@ -70,7 +70,7 @@ int main (int argc, char **argv)
     }
     int npop = (argc > 3) ? atoi (argv[3]) : 6;
     int i, j, cycles = 0;
-    int bgw, bgh, bgx, bgy, maxx, maxy, sx, sy, sw, sh;
+    int bgw, bgh, bgx, bgy, maxx, maxy, sx, sy, sw, sh, fx, fy, fw, fh;
     long tasks, warm, done = 0;
     double mstart;
 
@@ -89,18 +89,18 @@ int main (int argc, char **argv)
     }
 
     bw_stage (80, &sx, &sy, &sw, &sh);
-    bgw = MIN (BGW, sw); bgh = MIN (BGH, sh);
+    bw_stage (STAGE_MARGIN, &fx, &fy, &fw, &fh);
     /*
-     * Right-aligned, kept short of the stage edge. transbench opens its wider
-     * background above this window, so from the left corner this one was
-     * covered whole; reaching the edge would take the only strip fsbench, the
-     * window under both, has left.
+     * Right edges in steps of STRIP, counted from the frame every load shares
+     * rather than from this one: fsbench under everything ends at the edge,
+     * this window one strip in, and transbench's wider background - which
+     * opens above this one - another strip in again. Sized to the step and not
+     * merely shifted to it, or on a screen too narrow for the full width the
+     * window slides back to the corner and transbench covers it whole.
      */
-    bgx = sx + sw - bgw - 40;
-    if (bgx < sx)
-    {
-        bgx = sx;
-    }
+    bgh = MIN (BGH, sh);
+    bgw = MIN (BGW, fx + fw - STAGE_STRIP - sx);
+    bgx = fx + fw - STAGE_STRIP - bgw;
     bgy = sy;
     /* How far along and down the popups may march before starting again */
     maxx = bgw - 200 - popw;
