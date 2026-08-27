@@ -102,7 +102,11 @@ really moved. A test the window manager cannot run is flagged "not done", and
 one that tries and fails is flagged "failed" - neither is filled with the small
 number a window manager doing nothing produces.
 
-The CPU column is the desktop's own processes, not the programs being measured.
+The CPU column is the total seconds all CPU cores spent by the desktop drawing
+and managing windows, not how long the test took: a 10 second test can show 15
+CPU seconds when two cores are busy. Less is better.
+
+The column is the desktop's own processes, not the programs being measured.
 On Wayland that is the compositor. On X11 it is the window manager plus the X
 server, because the work is split between the two: leaving the server out gives
 X11 its share for free, and on a session without compositing the server does

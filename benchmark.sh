@@ -36,7 +36,12 @@ tests:
 
 Every test does the same fixed amount of work in every session, however long
 that takes, so power and CPU time compare directly. The one exception is
-uncapped, which is deliberately flat out and reports only frames a second.
+uncapped, which is deliberately flat out and reports only frames per second.
+
+Desktop CPU is the total seconds all CPU cores spent by the desktop drawing
+and managing windows: the compositor on Wayland, and on X11 the window
+manager, whatever composites for it and the X server. It is not how long the
+test took, so it can be larger than the time elapsed. Less is better.
 
 A test the window manager cannot run is flagged "not done", and a test that
 tries and fails is flagged "failed".

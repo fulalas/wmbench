@@ -1,8 +1,8 @@
 #!/bin/bash
-# Put every benchmark result in four boxed tables - frame rate, energy, power
-# and desktop CPU - one column per desktop, the best of each line in bold.
+# Put the four totals of every benchmark result in one boxed table as
+# percentages, the best of each line being 100%.
 #
-#   ./compare_results.sh [folder]        default results/
+#   ./compare_percent.sh [folder]        default results/
 case "${1:-}" in
     -h|--help) sed -n '2,/^[^#]/ { /^#/ s/^# \{0,1\}//p }' "$0"; exit 0;;
 esac
@@ -55,14 +55,10 @@ function key_from_report(path,    line, s, de, wm, st, ver, kk) {
         {
             wm = line;
             sub (/^compositor: */, "", wm);
-            # The version is the word after the name, before the note in
-            # brackets. Empty when nothing would say what it is
             ver = wm;
             sub (/^[^ ]* */, "", ver);
             sub (/ *\(.*$/, "", ver);
             sub (/ .*$/, "", wm);
-            # wm_canon writes the name in lower case, so a hand-typed one has
-            # to be folded too or the same desktop gets two columns
             wm = tolower (wm);
         }
         else if (line ~ /^== data/)
@@ -75,12 +71,7 @@ function key_from_report(path,    line, s, de, wm, st, ver, kk) {
     if (de == "" || de == "unknown-desktop") de = "unknown";
 
     kk = de "/" wm "/" st;
-    # The parts go one above the other: on one line the header alone is wider
-    # than the numbers under it, and the table wraps
     h1[kk] = de; h2[kk] = wm; h3[kk] = st;
-    # A column can hold more than one run. A desktop whose compositor was
-    # upgraded between them would otherwise print whichever version was read
-    # last over numbers that came from both
     if (!(kk in h4)) h4[kk] = ver;
     else if (h4[kk] != ver) vmixed[kk] = 1;
 
@@ -111,92 +102,33 @@ function line(first, arr,    i, s) {     # one line of the box
     print s "\342\224\202";
 }
 
-# The header block is three lines tall either way, so the name goes in it and
-# the line below is left to the numbers
-function single(what, title, low,    i, v, best, cells) {
-    printf "%s - %s is better, best in bold\n\n", title, low ? "lower" : "higher";
-    rule("\342\224\214", "\342\224\254", "\342\224\220");
-    for (i = 1; i <= nkeys; i++) hdr[i] = h1[order[i]];
-    line(what, hdr);
-    for (i = 1; i <= nkeys; i++) hdr[i] = h2[order[i]];
-    line("", hdr);
-    for (i = 1; i <= nkeys; i++) hdr[i] = h3[order[i]];
-    line("", hdr);
-    for (i = 1; i <= nkeys; i++) hdr[i] = h4[order[i]];
-    line("", hdr);
-    rule("\342\224\234", "\342\224\274", "\342\224\244");
+# Higher is better for frames, lower for the rest, and both end up as "100% is
+# the best": the winner divides the others one way round or the other.
+function row(what, low,    i, v, best, cells) {
     best = "";
     for (i = 1; i <= nkeys; i++)
     {
         v = one[order[i], what];
-        if (v == "" || v == "-") continue;
+        if (v == "" || v == "-" || v + 0 == 0) continue;
         if (best == "" || (low ? v + 0 < best : v + 0 > best)) best = v + 0;
     }
     for (i = 1; i <= nkeys; i++)
     {
         v = one[order[i], what];
-        if (v == "") v = "-";
-        cells[i] = (v != "-" && best != "" && v + 0 == best) ?
-                   B pad(v, wid[i]) O : pad(v, wid[i]);
+        if (v == "" || v == "-" || v + 0 == 0 || best == "")
+        {
+            cells[i] = pad("-", wid[i]);
+            continue;
+        }
+        # One decimal, or two figures a fraction apart both read 100% and the
+        # bold is the only thing saying which one won
+        cells[i] = sprintf ("%.1f%%", 100 * (low ? best / v : v / best));
+        cells[i] = (v + 0 == best) ? B pad(cells[i], wid[i]) O :
+                                     pad(cells[i], wid[i]);
     }
     printf "\342\224\202%s", pad(what, w0);
     for (i = 1; i <= nkeys; i++) printf "\342\224\202%s", cells[i];
     print "\342\224\202";
-    rule("\342\224\224", "\342\224\264", "\342\224\230");
-    print "";
-}
-
-function table(idx, title,    i, j, k2, v, best, cells, hdr, blank) {
-    printf "%s - lower is better, best in bold\n\n", title;
-    rule("\342\224\214", "\342\224\254", "\342\224\220");
-    for (i = 1; i <= nkeys; i++) hdr[i] = h1[order[i]];
-    line("workload", hdr);
-    for (i = 1; i <= nkeys; i++) hdr[i] = h2[order[i]];
-    line("", hdr);
-    for (i = 1; i <= nkeys; i++) hdr[i] = h3[order[i]];
-    line("", hdr);
-    for (i = 1; i <= nkeys; i++) hdr[i] = h4[order[i]];
-    line("", hdr);
-    rule("\342\224\234", "\342\224\274", "\342\224\244");
-    for (j = 1; j <= nrows; j++)
-    {
-        if (rows[j] == "total")
-        {
-            rule("\342\224\234", "\342\224\274", "\342\224\244");
-        }
-        best = "";
-        for (i = 1; i <= nkeys; i++)
-        {
-            v = val[order[i], rows[j], idx];
-            if (v != "" && v != "-" && (best == "" || v + 0 < best))
-            {
-                best = v + 0;
-            }
-        }
-        for (i = 1; i <= nkeys; i++)
-        {
-            v = val[order[i], rows[j], idx];
-            if (v == "") v = "-";
-            # The bold codes are not printed characters, so the cell is padded
-            # first and dressed afterwards, or every column would come out short
-            if (v != "-" && best != "" && v + 0 == best)
-            {
-                cells[i] = B pad(v, wid[i]) O;
-            }
-            else
-            {
-                cells[i] = pad(v, wid[i]);
-            }
-        }
-        # Watts are a rate: the last row of the power table is the average
-        # over the run, and only the seconds ever add up
-        printf "\342\224\202%s", pad((rows[j] == "total" && idx == 1) ?
-                                     "average" : rows[j], w0);
-        for (i = 1; i <= nkeys; i++) printf "\342\224\202%s", cells[i];
-        print "\342\224\202";
-    }
-    rule("\342\224\224", "\342\224\264", "\342\224\230");
-    print "";
 }
 
 FNR == 1 {
@@ -222,18 +154,21 @@ k == "" { next }
     if (disp[k] == "") disp[k] = d;
     else if (disp[k] != d) mixed[k] = 1;
 }
-# Averaged like the rest
-/^energy:/   { esum[k] += $2; ecnt[k]++ }
-/^speed:/    { ssum[k] += $2; scnt[k]++ }
+/^energy:/   { sum[k, "energy"] += $2; cnt[k, "energy"]++ }
+/^speed:/    { sum[k, "frames per second"] += $2; cnt[k, "frames per second"]++ }
 
 # row: <watts> <cpu seconds> <seconds elapsed> <name>, as benchmark.sh writes
-# it. Runs of the same desktop are averaged, so each column carries its count.
+# it. Only the total line is wanted here, and runs of the same desktop are
+# averaged, so each column carries its count.
 /^row: / {
     label = $5;
     for (i = 6; i <= NF; i++) label = label " " $i;
-    if (!(label in rowseen)) { rowseen[label] = 1; rows[++nrows] = label }
-    if ($2 != "-") { sum[k, label, 1] += $2; cnt[k, label, 1]++ }
-    if ($3 != "-") { sum[k, label, 2] += $3; cnt[k, label, 2]++ }
+    # A desktop that skipped tests has a smaller total than one that ran them
+    # all, and would win the table for having done less
+    if ($2 == "-" && $3 == "-" && label != "total") short[k] = 1;
+    if (label != "total") next;
+    if ($2 != "-") { sum[k, "power"] += $2; cnt[k, "power"]++ }
+    if ($3 != "-") { sum[k, "desktop CPU"] += $3; cnt[k, "desktop CPU"]++ }
 }
 
 END {
@@ -244,33 +179,16 @@ END {
         exit 1;
     }
 
-    # The total goes last, under a rule of its own
-    for (j = 1; j <= nrows; j++) if (rows[j] == "total") tj = j;
-    if (tj)
-    {
-        for (j = tj; j < nrows; j++) rows[j] = rows[j + 1];
-        rows[nrows] = "total";
-    }
-
+    nrows = split ("frames per second,energy,power,desktop CPU", rows, ",");
     for (i = 1; i <= nkeys; i++)
-    {
-        k2 = order[i];
         for (j = 1; j <= nrows; j++)
         {
-            for (n = 1; n <= 2; n++)
-            {
-                val[k2, rows[j], n] = cnt[k2, rows[j], n] ?
-                    sprintf ("%.2f", sum[k2, rows[j], n] / cnt[k2, rows[j], n]) : "-";
-            }
-            # Both columns: watts alone is "-" on every run whose machine has
-            # no power sensor, tests run and all
-            if (rows[j] != "total" && val[k2, rows[j], 1] == "-" &&
-                val[k2, rows[j], 2] == "-") short[k2] = 1;
+            one[order[i], rows[j]] = cnt[order[i], rows[j]] ?
+                sum[order[i], rows[j]] / cnt[order[i], rows[j]] : "-";
         }
-    }
 
     # Wide enough for the longest thing in each column
-    w0 = length ("workload");
+    w0 = length ("measure");
     for (j = 1; j <= nrows; j++) if (length (rows[j]) > w0) w0 = length (rows[j]);
     w0 += 2;
     for (i = 1; i <= nkeys; i++)
@@ -285,22 +203,29 @@ END {
         wid[i] += 2;
     }
 
-    for (i = 1; i <= nkeys; i++)
-    {
-        k2 = order[i];
-        one[k2, "fps"] = scnt[k2] ? sprintf ("%.2f", ssum[k2] / scnt[k2]) : "-";
-        one[k2, "energy"] = ecnt[k2] ? sprintf ("%.0f", esum[k2] / ecnt[k2]) : "-";
-    }
+    print "Totals as percentages - the best is 100%, in bold\n";
+    rule("\342\224\214", "\342\224\254", "\342\224\220");
+    for (i = 1; i <= nkeys; i++) hdr[i] = h1[order[i]];
+    line("measure", hdr);
+    for (i = 1; i <= nkeys; i++) hdr[i] = h2[order[i]];
+    line("", hdr);
+    for (i = 1; i <= nkeys; i++) hdr[i] = h3[order[i]];
+    line("", hdr);
+    for (i = 1; i <= nkeys; i++) hdr[i] = h4[order[i]];
+    line("", hdr);
+    rule("\342\224\234", "\342\224\274", "\342\224\244");
+    for (j = 1; j <= nrows; j++) row(rows[j], rows[j] != "frames per second");
+    rule("\342\224\224", "\342\224\264", "\342\224\230");
+    print "";
 
-    single("fps", "Frames per second, windowed", 0);
-    single("energy", "Energy (J)", 1);
-    table(1, "Power (W)");
-    table(2, "Desktop CPU (s)");
+    print "* a line reads: 100% is the best figure, 50% is half as good";
+    print "* frames per second is the uncapped test, the other three are the";
+    print "  totals of every test that ran";
 
     s = "";
     for (i = 1; i <= nkeys; i++)
         if (short[order[i]]) s = s (s == "" ? "" : ", ") order[i];
-    if (s != "") printf "* some tests didn'\''t run on: %s\n", s;
+    if (s != "") printf "* NOT COMPARABLE: some tests didn'\''t run on: %s\n", s;
 
     s = "";
     for (i = 1; i <= nkeys; i++)
@@ -311,10 +236,6 @@ END {
     for (i = 1; i <= nkeys; i++)
         if (vmixed[order[i]]) s = s (s == "" ? "" : ", ") order[i];
     if (s != "") printf "* marked *: the runs were not all the same version: %s\n", s;
-
-    print "* fullscreen asked tests if the compositor steps aside when asked";
-    print "* desktop CPU is the total seconds all CPU cores spent by the desktop";
-    print "  drawing and managing windows";
 
     # Were the conditions the same? A different refresh rate or scale is not a
     # detail: at 120 Hz the compositor repaints twice as often as at 60.
@@ -339,7 +260,6 @@ END {
     if (ignored != "")
         printf "* left out, no session or compositor line: %s\n", ignored;
 
-    # Runs of the same desktop are averaged, so how many there were matters
     same = 1;
     for (i = 2; i <= nkeys; i++) if (runs[order[i]] != runs[order[1]]) same = 0;
     if (same)
