@@ -732,10 +732,19 @@ STRESS_STACK=("fsbench" "popbench background" "transbench background"
 # On Wayland nothing can ask about another program's windows, so a window is
 # waited for through the load's own log instead: every tool prints a
 # "WINDOW-UP <name>" marker after its first commit.
-stress_wait_up () {             # $1 marker, $2 log
+stress_wait_up () {             # $1 marker, $2 log, $3 pid
     local i
     for i in $(seq 300); do     # up to 30 seconds, like restack -wait
         grep -q "$1" "$2" 2>/dev/null && return 0
+        # A load that has already gone will never write it. Waiting the full
+        # thirty seconds for a marker from a dead process buries the reason it
+        # gave - a refusal names the protocol the compositor is missing
+        if [ -n "${3:-}" ] && ! kill -0 "$3" 2>/dev/null; then
+            grep -q "$1" "$2" 2>/dev/null && return 0
+            grep -q REFUSED "$2" 2>/dev/null ||
+                echo "stopped before its window was on screen" >> "$2"
+            return 1
+        fi
         sleep 0.1
     done
     echo "never saw $1" >> "$2"
@@ -772,7 +781,8 @@ stress_start () {
     STRESS_SCENERY_PID=$!
     if [ "$(backend_type)" = wayland ]; then
         # READY comes after every one of its windows is up
-        stress_wait_up "^READY " "$STRESS_PRE-many.log" || STRESS_LATE=1
+        stress_wait_up "^READY " "$STRESS_PRE-many.log" \
+            "$STRESS_SCENERY_PID" || STRESS_LATE=1
     else
         ./tools/restack -wait "manywin" || STRESS_LATE=1
     fi
@@ -809,7 +819,8 @@ stress_load () {                # $1 name, $2 tasks, $3 window, $4... program
     # window that never appears is not a stacking question, it is a broken
     # load, and the caller is told rather than left to guess later.
     if [ "$(backend_type)" = wayland ]; then
-        stress_wait_up "^WINDOW-UP $win\$" "$log" || STRESS_LATE=1
+        stress_wait_up "^WINDOW-UP $win\$" "$log" "${STRESS_PIDS[-1]}" ||
+            STRESS_LATE=1
     else
         ./tools/restack -wait "$win" >> "$log" 2>&1 || STRESS_LATE=1
     fi
