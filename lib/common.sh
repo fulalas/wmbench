@@ -455,6 +455,15 @@ session_type () {
     if [ -n "${WAYLAND_DISPLAY:-}" ]; then echo wayland; else echo x11; fi
 }
 
+# What the windows are, which is not what the session is: BENCH_BACKEND=x11 on
+# a Wayland session opens them through XWayland. Anything that talks to the
+# windows - markers they print, tools that read the stack - goes by this;
+# anything about the session itself goes by session_type. Same rule as
+# bw_open in lib/win.c, and it has to stay the same rule.
+backend_type () {
+    if [ "${BENCH_BACKEND:-}" = x11 ]; then echo x11; else session_type; fi
+}
+
 # The name is on the window named by _NET_SUPPORTING_WM_CHECK, the pid only
 # sometimes: some leave _NET_WM_PID unset. Echoed on two lines, because a name
 # has spaces in it often enough and a missing pid leaves nothing.
@@ -654,7 +663,7 @@ detect_wm () {
     # it out hands X11 whatever it did - on a session that does not composite,
     # nearly the lot. Both or neither, because a figure missing one of them
     # still reads like the whole desktop's.
-    if [ "$st" = x11 ] || [ "${BENCH_BACKEND:-}" = x11 ]; then
+    if [ "$(backend_type)" = x11 ]; then
         pid=$(x_server_pid) || pid=""
         if [ -n "$pid" ] && [ -n "$WM_PIDS" ]; then
             WM_PIDS="$WM_PIDS $pid"
@@ -748,7 +757,7 @@ stress_start () {
     # On Wayland the translucent window maps itself only when the gate opens,
     # so it lands on top; what says the load is up there is its background
     local tw="transbench translucent"
-    [ "$(session_type)" = wayland ] && tw="transbench background"
+    [ "$(backend_type)" = wayland ] && tw="transbench background"
 
     stress_load render "$r"             "fsbench" \
         ./tools/fsbench2 0 windowed 60
@@ -761,7 +770,7 @@ stress_start () {
         ./tools/transbench 0 0.75 60
     ./tools/manywin 12 > "$STRESS_PRE-many.log" 2>&1 &
     STRESS_SCENERY_PID=$!
-    if [ "$(session_type)" = wayland ]; then
+    if [ "$(backend_type)" = wayland ]; then
         # READY comes after every one of its windows is up
         stress_wait_up "^READY " "$STRESS_PRE-many.log" || STRESS_LATE=1
     else
@@ -778,7 +787,7 @@ stress_start () {
 # for the whole order outright, for one that will not stack them as they open:
 # better a scene put right by asking than no row at all.
 stress_settle () {
-    if [ "$(session_type)" = wayland ]; then
+    if [ "$(backend_type)" = wayland ]; then
         # The translucent window maps itself at the gate, so it lands on top;
         # nothing can read the order back to prove the rest
         return 0
@@ -799,7 +808,7 @@ stress_load () {                # $1 name, $2 tasks, $3 window, $4... program
     # On screen before the next one is opened, or they race for the order. A
     # window that never appears is not a stacking question, it is a broken
     # load, and the caller is told rather than left to guess later.
-    if [ "$(session_type)" = wayland ]; then
+    if [ "$(backend_type)" = wayland ]; then
         stress_wait_up "^WINDOW-UP $win\$" "$log" || STRESS_LATE=1
     else
         ./tools/restack -wait "$win" >> "$log" 2>&1 || STRESS_LATE=1

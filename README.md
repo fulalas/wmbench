@@ -8,6 +8,7 @@ runs; what it cannot do is reported as not done rather than as a number.
 
     make                    build everything
     ./benchmark.sh          measure the session, print a table
+    ./benchmark.sh -x11     the same, with the windows opened through XWayland
     ./validate.sh           look for visual defects, print a verdict
     ./compare_results.sh    put the saved runs side by side
 
@@ -22,9 +23,9 @@ with no visible process.
 ## The two backends
 
 Every binary carries both and picks at startup: `WAYLAND_DISPLAY` set means
-native Wayland, otherwise Xlib. `BENCH_BACKEND=x11` forces the X11 backend on a
-Wayland session, so it runs through XWayland - the same load twice is how
-XWayland's own cost is measured. `BENCH_OUTPUT=<name>` picks the monitor.
+native Wayland, otherwise Xlib. `BENCH_BACKEND=x11`, or `benchmark.sh -x11`,
+forces the X11 backend on a Wayland session, so it runs through XWayland and is
+recorded as `xwayland`. `BENCH_OUTPUT=<name>` picks the monitor.
 
 What runs natively depends on the protocols the compositor speaks, probed at
 startup:

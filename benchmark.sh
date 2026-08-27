@@ -6,7 +6,10 @@ usage_help () {
     cat <<EOF
 benchmark the window manager this session is running
 
-  ./benchmark.sh [test ...]     run everything, or only the tests named
+  ./benchmark.sh [-x11] [test ...]  run everything, or only the tests named
+
+  -x11        on a Wayland session, run the tests as X11 clients through
+              XWayland instead of natively
 
 tests:
   idle        nothing happening
@@ -44,6 +47,15 @@ EOF
 }
 case "${1:-}" in -h|--help) usage_help; exit 0;; esac
 
+ARGS=()
+for a in "$@"; do
+    case "$a" in
+        -x11) export BENCH_BACKEND=x11;;
+        *)    ARGS+=("$a");;
+    esac
+done
+set -- ${ARGS[@]+"${ARGS[@]}"}
+
 TESTS=${*:-$ALL}
 for t in $TESTS; do
     case "$t" in idle|move|resize|dnd|popups|video|argb|windows|scroll|render|fullscreen|uncapped|stress) ;;
@@ -76,11 +88,15 @@ power_unlock
 
 detect_wm || { echo "cannot tell what window manager this is"; exit 1; }
 ST=$(session_type)
+# The same compositor doing two different jobs: recorded under two names, or
+# the two runs are compared as though they were the same measurement
+RUN_AS=$ST
+[ "$ST" = wayland ] && [ "$(backend_type)" = x11 ] && RUN_AS=xwayland
 
 DE=$(echo "${XDG_CURRENT_DESKTOP:-unknown}" | tr '[:upper:]' '[:lower:]' | tr ':/ ' '-')
 # A dash in the version would read as another field in the file name
 WMVER=$(wm_version | tr '-' '.')
-OUT="results/benchmark-$(date +%Y%m%d-%H%M%S)-$(hostname)-$DE-$WM_NAME-${WMVER:-unknown}-$ST.txt"
+OUT="results/benchmark-$(date +%Y%m%d-%H%M%S)-$(hostname)-$DE-$WM_NAME-${WMVER:-unknown}-$RUN_AS.txt"
 mkdir -p results
 tee_report "$OUT"
 
@@ -104,7 +120,13 @@ keep_awake
 echo "system:     $(hostname) ($(. /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-unknown}"))"
 echo "kernel:     $(uname -r)"
 echo "display:    $(display_info)"
-echo "session:    $ST (${XDG_CURRENT_DESKTOP:-unknown desktop})"
+# compare_results reads the first word of this line to tell one run from
+# another, so it has to name what ran, not the socket that happens to be open
+echo "session:    $RUN_AS (${XDG_CURRENT_DESKTOP:-unknown desktop})"
+if [ "$RUN_AS" = xwayland ]; then
+    echo "            a Wayland session, with the windows opened as X11"
+    echo "            clients through XWayland, asked for with -x11"
+fi
 # On X11 the compositor announces itself by owning a selection, which has to
 # be asked for by name and cannot be read off the root window; a Wayland
 # compositor always composites
