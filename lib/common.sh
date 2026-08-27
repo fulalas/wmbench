@@ -316,52 +316,22 @@ wm_version () {
         grep -oE '[0-9]+\.[0-9]+[0-9A-Za-z.+~-]*' | head -1
 }
 
-# On Wayland the compositor is asked, one tool after another until one answers:
-# XWayland's xrandr shows only the scaled-down logical view, not the panel
+# On Wayland the compositor itself is asked over wl_output, which every
+# compositor has, so no tool of any particular desktop is named here. On X11
+# xrandr answers. A Wayland session with the windows in XWayland still asks the
+# compositor: xrandr there shows the scaled-down logical view, not the panel.
 display_info () {
-    local res="" scale="" dpi out tool cur hz
+    local res="" scale="" dpi w h mhz s
 
-    if [ "$(session_type)" = wayland ]; then
-        for tool in "wlr-randr" "cosmic-randr list" "kscreen-doctor -o"; do
-            command -v "${tool%% *}" >/dev/null || continue
-            # Some of these colour their output; strip the escapes first
-            out=$($tool 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g') || continue
-            # Some mark the current mode with a star instead of a word
-            cur=$(echo "$out" | grep -i current | head -1)
-            [ -n "$cur" ] || cur=$(echo "$out" |
-                grep -oE '[0-9]{3,}x[0-9]{3,}@[0-9]+(\.[0-9]+)?\*' | head -1)
-            [ -n "$cur" ] || continue
-            res=$(echo "$cur" | grep -oE '[0-9]{3,}x[0-9]{3,}' | head -1)
-            [ -n "$res" ] || continue
-            hz=$(echo "$cur" |
-                 grep -oE '[0-9]+(\.[0-9]+)?[[:space:]]*(Hz|\*)' |
-                 grep -oE '^[0-9]+' | tail -1)
-            [ -z "$hz" ] && hz=$(echo "$cur" | grep -oE '@[0-9]+' | tr -d @ | head -1)
-            scale=$(echo "$out" | grep -iE '^[[:space:]]*Scale' | head -1 |
-                    grep -oE '[0-9]+(\.[0-9]+)?' | head -1)
-            [ -n "$scale" ] && scale=$(awk -v x="$scale" 'BEGIN{printf "%.2f", x}')
-            [ -n "$hz" ] && res="$res @ $hz Hz"
-            break
-        done
-    fi
-    # Where none of them answered, the compositor may still answer over D-Bus:
-    # the current mode is the one marked is-current, the scale sits on the
-    # logical monitor
-    if [ "$(session_type)" = wayland ] && [ -z "$res" ]; then
-        out=$(gdbus call --session --dest org.gnome.Mutter.DisplayConfig \
-                    --object-path /org/gnome/Mutter/DisplayConfig \
-                    --method org.gnome.Mutter.DisplayConfig.GetCurrentState \
-                    2>/dev/null)
-        if [ -n "$out" ]; then
-            cur=$(echo "$out" |
-                  grep -oE "\('[0-9]+x[0-9]+@[0-9.]+'[^)]*'is-current': <true>" |
-                  head -1)
-            res=$(echo "$cur" | grep -oE '[0-9]+x[0-9]+' | head -1)
-            hz=$(echo "$cur" | grep -oE '@[0-9]+' | head -1 | tr -d @)
-            scale=$(echo "$out" |
-                    grep -oE '\[\(-?[0-9]+, -?[0-9]+, [0-9]+(\.[0-9]+)?, uint32' |
-                    head -1 | awk -F', ' '{printf "%.2f", $3}')
-            [ -n "$res" ] && [ -n "$hz" ] && res="$res @ $hz Hz"
+    if [ "$(session_type)" = wayland ] && [ -x ./tools/displayinfo ]; then
+        read -r w h mhz s < <(./tools/displayinfo 2>/dev/null)
+        if [ -n "${w:-}" ]; then
+            res="${w}x${h}"
+            # No refresh rate where there is no real panel, and a made-up
+            # 0 Hz would read as a measurement
+            [ "$mhz" -gt 0 ] 2>/dev/null &&
+                res="$res @ $(( (mhz + 500) / 1000 )) Hz"
+            scale=$s
         fi
     fi
 
@@ -374,7 +344,6 @@ display_info () {
         if [ -n "$dpi" ] && [ "$dpi" -gt 0 ] 2>/dev/null; then
             scale=$(awk -v d="$dpi" 'BEGIN{printf "%g", d / 96}')
         fi
-        [ "$(session_type)" = wayland ] && [ -n "$res" ] && res="$res (XWayland view)"
     fi
     echo "${res:-unknown}, scale ${scale:-1}"
 }

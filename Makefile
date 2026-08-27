@@ -65,9 +65,9 @@ WINH = lib/win.h lib/win_priv.h lib/draw.h lib/capture.h lib/place.h \
 GATE = lib/gate.o
 LIBS = $(X11) $(WL)
 
-TOOLS  = tools/cmcheck tools/restack tools/fsbench2 tools/movebench \
-         tools/transbench tools/manywin tools/popbench tools/argbbench \
-         tools/videobench tools/usagebench
+TOOLS  = tools/cmcheck tools/displayinfo tools/restack tools/fsbench2 \
+         tools/movebench tools/transbench tools/manywin tools/popbench \
+         tools/argbbench tools/videobench tools/usagebench
 CHECKS = checks/motion_check checks/stale_check checks/pop_check \
          checks/suspend_check checks/shape_check checks/resize_check \
          checks/offscreen_check checks/iconify_check checks/leftover_check
@@ -83,6 +83,10 @@ $(WIN) $(GATE): %.o: %.c $(WINH) lib/gate.h
 # Does anything own the compositing selection on this display? X11 only.
 tools/cmcheck: tools/cmcheck.c
 	$(CC) $(CFLAGS) $(INC) -o $@ $< -lX11
+# The screen as the compositor describes it. Its own small connection: it
+# also has to answer during an XWayland run, where the window layer is X11.
+tools/displayinfo: tools/displayinfo.c lib/protocols/xdg-output-unstable-v1-protocol.c $(PROTO_HDR)
+	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/protocols/xdg-output-unstable-v1-protocol.c $(WL)
 # Put windows in a known order: its own X11 tree walk, the foreign-toplevel
 # list on Wayland
 tools/restack: tools/restack.c $(WIN) $(WINH)
