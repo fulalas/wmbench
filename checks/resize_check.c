@@ -289,7 +289,7 @@ int main (int argc, char **argv)
             if (known == 0)
             {
                 /*
-                 * Not one row of ours anywhere: we are photographing another
+                 * Not one line of ours anywhere: we are photographing another
                  * window, not a defect in this one. See the same reasoning at
                  * the edge test above. The edge test looks at the same step
                  * and may have said so already, and one step covered is one
@@ -306,7 +306,7 @@ int main (int argc, char **argv)
             {
                 /* Something that is not the pattern at all: black, or garbage */
                 foreign++;
-                printf ("step %d: %d of %d rows are not the pattern at all\n",
+                printf ("step %d: %d of %d lines are not the pattern at all\n",
                         s, total - known, total);
             }
             else

@@ -412,7 +412,7 @@ int main (int argc, char **argv)
      * Twice if need be. The raise is a request, and a window manager with six
      * programs putting windows up at once answers it when it gets to it: a
      * stack read straight after the last request is often still settling, and
-     * calling that a refusal would throw away a row that was perfectly good.
+     * calling that a refusal would throw away a test that was perfectly good.
      */
     if (!check_only)
     {

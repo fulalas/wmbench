@@ -410,7 +410,7 @@ end_report () {
 }
 
 # A screen that blanks mid-run leaves the compositor drawing nothing, so the
-# rows after it are not measurements of anything. The settings are put back
+# tests after it are not measurements of anything. The settings are put back
 # exactly as they were afterwards, including when the run is interrupted. Only
 # X11 needs this: on Wayland each window inhibits idling through the protocol.
 AWAKE_SAVED=""
@@ -795,7 +795,7 @@ stress_start () {
 # A desktop that stacks them some other way composites a different scene, and
 # its numbers are not the same measurement as anyone else's. The fallback asks
 # for the whole order outright, for one that will not stack them as they open:
-# better a scene put right by asking than no row at all.
+# better a scene put right by asking than no test at all.
 stress_settle () {
     if [ "$(backend_type)" = wayland ]; then
         # The translucent window maps itself at the gate, so it lands on top;
@@ -831,7 +831,7 @@ stress_load () {                # $1 name, $2 tasks, $3 window, $4... program
 #
 # One that never reaches the gate is killed rather than waited on: the loops
 # after this one wait on the same programs, and a mix missing a load is not the
-# mix anyway, so the row has to fail whatever happens next.
+# mix anyway, so the test has to fail whatever happens next.
 stress_wait_ready () {
     local i left=1 deadline=$((SECONDS + BENCH_START_TIMEOUT))
 

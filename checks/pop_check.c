@@ -222,7 +222,7 @@ int main (int argc, char **argv)
             else
             {
                 bad++;
-                printf ("round %d: a popup left something behind at row %d\n",
+                printf ("round %d: a popup left something behind at line %d\n",
                         r + 1, wrong);
             }
         }

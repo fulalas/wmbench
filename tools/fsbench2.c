@@ -124,7 +124,7 @@ int main (int argc, char **argv)
     /* ww and wh are the window's logical size, fw and fh the pixels a frame
        really holds - the same on X11, the logical size times the output scale
        on Wayland. The buffer and the viewport are sized in the second. */
-    int wx, wy, ww, wh, fw, fh;
+    int wx, wy, ww, wh, fw, fh, askw, askh;
     long tasks, warm, done = 0;
 
     if (!bw_open ())
@@ -160,6 +160,8 @@ int main (int argc, char **argv)
         if (ww > room_w) ww = room_w;
         if (wh > room_h) wh = room_h;
     }
+    askw = ww;
+    askh = wh;
 
     if (on_wayland)
     {
@@ -393,6 +395,32 @@ int main (int argc, char **argv)
 
     printf ("renderer: %s\n", (const char *) glGetString (GL_RENDERER));
     fflush (stdout);
+
+    /* Windowed only: fullscreen is meant to come back a different size */
+    if (windowed)
+    {
+        int gw = ww, gh = wh;
+
+        if (!on_wayland)
+        {
+            Window r;
+            unsigned uw = 0, uh = 0, ub, ud;
+            int gx, gy;
+
+            if (XGetGeometry (xd, xwin, &r, &gx, &gy, &uw, &uh, &ub, &ud))
+            {
+                gw = (int) uw;
+                gh = (int) uh;
+            }
+        }
+        if (gw != askw || gh != askh)
+        {
+            printf ("size: fsbench asked %dx%d got %dx%d\n",
+                    askw, askh, gw, gh);
+            printf ("SIZE-CHANGED fsbench\n");
+            fflush (stdout);
+        }
+    }
 
     tasks = bench_tasks ();
     warm = (tasks > 0) ? 120 : 0;       /* shaders and the first frames */

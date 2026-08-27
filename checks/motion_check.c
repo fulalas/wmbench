@@ -44,7 +44,7 @@ static const unsigned long palette[NCOL] = {
     0xff00ff, 0x00ffff, 0xffffff, 0x808080
 };
 
-/* Which colour a row shows when the pattern is scrolled by offset */
+/* Which colour a line shows when the pattern is scrolled by offset */
 static int band_of (int y, int offset)
 {
     int k = (y + offset) / BAND;
@@ -144,7 +144,7 @@ int main (int argc, char **argv)
 
         /*
          * Draw the pattern at this offset and let the session have it. The
-         * bands start at -(offset % BAND) so that every row r really does
+         * bands start at -(offset % BAND) so that every line r really does
          * show palette[band_of (r, offset)], which is what the check below
          * asserts.
          */
@@ -174,7 +174,7 @@ int main (int argc, char **argv)
 
         /*
          * A clean capture is one whole frame: some single offset explains
-         * every row of it. Anything else is a mix of two frames.
+         * every line of it. Anything else is a mix of two frames.
          */
         for (i = 0; i < BAND * NCOL && fits < 0; i++)
         {

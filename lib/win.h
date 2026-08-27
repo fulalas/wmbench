@@ -79,6 +79,7 @@ int  bw_win_aimable (bw_win *);
    ways of asking (1 plain, 0 the pager request); Wayland ignores it */
 int  bw_move_raw (bw_win *, int x, int y, int w, int h, int way);
 void bw_where (bw_win *, int *x, int *y, int *w, int *h);
+void bw_asked_size (bw_win *, int *w, int *h);
 /* Does bw_where() carry the session's own answer rather than a belief?
    X11 and zone placement: yes. Layer-shell margins: no, hence the proof */
 int  bw_where_live (bw_win *);

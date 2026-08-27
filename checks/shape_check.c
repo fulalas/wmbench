@@ -195,7 +195,7 @@ int main (int argc, char **argv)
         else
         {
             bad++;
-            printf ("round %d: of %d rows, %d wrong inside the shape and "
+            printf ("round %d: of %d lines, %d wrong inside the shape and "
                     "%d wrong outside it\n", r + 1, checked, wrong_in,
                     wrong_out);
         }

@@ -101,16 +101,16 @@ int main (int argc, char **argv)
     for (i = 0; i < count; i++)
     {
         /* However many fit; the rest start again from the top, offset */
-        int rows = sh / (WINH + 60);
+        int down = sh / (WINH + 60);
         int x, y;
 
-        if (rows < 1)
+        if (down < 1)
         {
-            rows = 1;
+            down = 1;
         }
         x = sx + (i % cols) * (WINW + 40);
-        y = sy + ((i / cols) % rows) * (WINH + 60);
-        x += OVER * (i / (cols * rows));
+        y = sy + ((i / cols) % down) * (WINH + 60);
+        x += OVER * (i / (cols * down));
 
         wins[i] = bw_create (NULL, x, y, WINW, WINH, "manywin",
                              BW_PLACED | BW_UNMANAGED);

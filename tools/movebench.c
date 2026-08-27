@@ -187,7 +187,7 @@ int main (int argc, char **argv)
         steps++;
         /*
          * Now and then, look at where the window really is. A compositor can
-         * take every request and act on none of them, and then this row is a
+         * take every request and act on none of them, and then this test is a
          * measurement of a window sitting still - the smallest number in the
          * table, which reads as the best result in it.
          */
@@ -256,7 +256,7 @@ int main (int argc, char **argv)
 
     /*
      * The window never went anywhere, so there is no moving to measure. Say
-     * so with a status of its own: the row is left empty rather than filled
+     * so with a status of its own: the test is left empty rather than filled
      * with the small number a compositor doing nothing produces, which reads
      * as the best result in the table.
      */

@@ -7,7 +7,7 @@
 typedef struct {
     unsigned int *px;
     int w, h;
-    int stride;                 /* pixels a row really occupies; >= w, so a
+    int stride;                 /* pixels a line really occupies; >= w, so a
                                    resize can keep the pixels where they are */
     int argb;                   /* keep alpha as given, premultiplied */
     int clip_on;

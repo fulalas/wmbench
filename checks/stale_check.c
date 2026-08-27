@@ -66,7 +66,7 @@ static void draw_pattern (bw_win *w, int offset)
 }
 
 /* Every sampled pixel must be the colour this offset calls for */
-static int matches (bw_image *img, int offset, int *bad_row)
+static int matches (bw_image *img, int offset, int *bad_line)
 {
     int x, y;
 
@@ -79,7 +79,7 @@ static int matches (bw_image *img, int offset, int *bad_row)
             if (colour_index (bw_pixel (img, px, y)) !=
                 band_of (y + MARGIN, offset))
             {
-                *bad_row = y;
+                *bad_line = y;
 
                 return 0;
             }
@@ -213,7 +213,7 @@ int main (int argc, char **argv)
             else
             {
                 settled_bad++;
-                printf ("round %d: settled capture wrong from row %d\n",
+                printf ("round %d: settled capture wrong from line %d\n",
                         r + 1, bad);
             }
             bw_image_free (img);
@@ -258,7 +258,7 @@ int main (int argc, char **argv)
         else
         {
             stale_bad++;
-            printf ("round %d: window went stale from row %d\n",
+            printf ("round %d: window went stale from line %d\n",
                     r + 1, bad);
         }
         bw_image_free (img);

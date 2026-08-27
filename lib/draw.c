@@ -87,7 +87,7 @@ static void bounds (const draw_buf *b, int *x0, int *y0, int *x1, int *y1)
 void draw_fill (draw_buf *b, unsigned long colour, int x, int y, int w, int h)
 {
     unsigned int p = pixel_of (b, colour);
-    int x0, y0, x1, y1, row, col;
+    int x0, y0, x1, y1, line, col;
 
     bounds (b, &x0, &y0, &x1, &y1);
     if (x > x0) x0 = x;
@@ -102,11 +102,11 @@ void draw_fill (draw_buf *b, unsigned long colour, int x, int y, int w, int h)
     {
         b->px[(size_t) y0 * b->stride + col] = p;
     }
-    /* The rest of the block is that row again: one memcpy a row beats a
+    /* The rest of the block is that line again: one memcpy a line beats a
        store loop the compiler will not vectorise at -O2 */
-    for (row = y0 + 1; row < y1; row++)
+    for (line = y0 + 1; line < y1; line++)
     {
-        memcpy (b->px + (size_t) row * b->stride + x0,
+        memcpy (b->px + (size_t) line * b->stride + x0,
                 b->px + (size_t) y0 * b->stride + x0,
                 (size_t) (x1 - x0) * 4);
     }
@@ -127,7 +127,7 @@ void draw_rect (draw_buf *b, unsigned long colour, int x, int y, int w, int h,
 void draw_poly (draw_buf *b, unsigned long colour, const bw_point *p, int n)
 {
     unsigned int px = pixel_of (b, colour);
-    int x0, y0, x1, y1, row, i, col;
+    int x0, y0, x1, y1, line, i, col;
     int top = 0, bot = 0;
 
     if (n < 3)
@@ -144,7 +144,7 @@ void draw_poly (draw_buf *b, unsigned long colour, const bw_point *p, int n)
     if (top < y0) top = y0;
     if (bot > y1 - 1) bot = y1 - 1;
 
-    for (row = top; row <= bot; row++)
+    for (line = top; line <= bot; line++)
     {
         int lo = b->w, hi = -1;
 
@@ -158,12 +158,12 @@ void draw_poly (draw_buf *b, unsigned long colour, const bw_point *p, int n)
                 t = ay; ay = cy; cy = t;
                 t = ax; ax = cx; cx = t;
             }
-            if (row < ay || row > cy)
+            if (line < ay || line > cy)
             {
                 continue;
             }
             xx = (cy == ay) ? (ax < cx ? ax : cx)
-                            : ax + (cx - ax) * (row - ay) / (cy - ay);
+                            : ax + (cx - ax) * (line - ay) / (cy - ay);
             if (xx < lo) lo = xx;
             if (cy == ay)
             {
@@ -178,18 +178,18 @@ void draw_poly (draw_buf *b, unsigned long colour, const bw_point *p, int n)
             continue;
         }
         {
-            unsigned int *out = b->px + (size_t) row * b->stride + lo;
+            unsigned int *out = b->px + (size_t) line * b->stride + lo;
 
             for (col = lo; col <= hi; col++)
             {
                 *out++ = px;
             }
         }
-        draw_note (b, lo, row, hi + 1, row + 1);
+        draw_note (b, lo, line, hi + 1, line + 1);
     }
 }
 
-/* One byte a column, top row in the low bit. Every session has to render
+/* One byte a column, top line in the low bit. Every session has to render
    the same pixels for the same string */
 static const unsigned char font5x7[95][5] = {
     {0x00,0x00,0x00,0x00,0x00}, /* space */
@@ -296,11 +296,11 @@ void draw_text (draw_buf *b, unsigned long colour, int x, int y, const char *s,
     int x0, y0, x1, y1, cx = x;
 
     bounds (b, &x0, &y0, &x1, &y1);
-    /* The baseline sits under the 7 rows, the way X core text is placed */
+    /* The baseline sits under the 7 lines, the way X core text is placed */
     y -= 7 * scale;
     for (; *s != '\0'; s++, cx += 6 * scale)
     {
-        int c = (unsigned char) *s, col, row;
+        int c = (unsigned char) *s, col, line;
 
         if (c < 0x20 || c > 0x7e)
         {
@@ -310,16 +310,16 @@ void draw_text (draw_buf *b, unsigned long colour, int x, int y, const char *s,
         {
             unsigned char bits = font5x7[c - 0x20][col];
 
-            for (row = 0; row < 7; row++)
+            for (line = 0; line < 7; line++)
             {
                 int px0, py0, sy, sx;
 
-                if (!(bits & (1u << row)))
+                if (!(bits & (1u << line)))
                 {
                     continue;
                 }
                 px0 = cx + col * scale;
-                py0 = y + row * scale;
+                py0 = y + line * scale;
                 for (sy = 0; sy < scale; sy++)
                 {
                     unsigned int *out;
@@ -361,7 +361,7 @@ void draw_clip (draw_buf *b, int x, int y, int w, int h)
 void draw_copy (draw_buf *dst, const draw_buf *src, int sx, int sy,
                 int w, int h, int dx, int dy)
 {
-    int row;
+    int line;
 
     /* Trim to what both buffers really hold, and to the destination's clip,
        the way a server copy is cut by the GC's */
@@ -385,22 +385,22 @@ void draw_copy (draw_buf *dst, const draw_buf *src, int sx, int sy,
         return;
     }
     /* Downwards within one buffer would smear, the way memcpy does and
-       XCopyArea does not; those rows are carried bottom up instead */
+       XCopyArea does not; those lines are carried bottom up instead */
     if (dst->px == src->px && dy > sy)
     {
-        for (row = h - 1; row >= 0; row--)
+        for (line = h - 1; line >= 0; line--)
         {
-            memmove (dst->px + (size_t) (dy + row) * dst->stride + dx,
-                     src->px + (size_t) (sy + row) * src->stride + sx,
+            memmove (dst->px + (size_t) (dy + line) * dst->stride + dx,
+                     src->px + (size_t) (sy + line) * src->stride + sx,
                      (size_t) w * 4);
         }
     }
     else
     {
-        for (row = 0; row < h; row++)
+        for (line = 0; line < h; line++)
         {
-            memmove (dst->px + (size_t) (dy + row) * dst->stride + dx,
-                     src->px + (size_t) (sy + row) * src->stride + sx,
+            memmove (dst->px + (size_t) (dy + line) * dst->stride + dx,
+                     src->px + (size_t) (sy + line) * src->stride + sx,
                      (size_t) w * 4);
         }
     }

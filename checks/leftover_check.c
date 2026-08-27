@@ -94,7 +94,7 @@ static unsigned char *covered_mask (Display *d, Window root, int w, int h)
     for (i = 0; i < n; i++)
     {
         XWindowAttributes a;
-        int x0, x1, y0, y1, row;
+        int x0, x1, y0, y1, line;
 
         if (!XGetWindowAttributes (d, kids[i], &a))
         {
@@ -115,9 +115,9 @@ static unsigned char *covered_mask (Display *d, Window root, int w, int h)
         y1 = a.y + a.height + MARGIN > h ? h : a.y + a.height + MARGIN;
         if (x1 > x0)
         {
-            for (row = y0; row < y1; row++)
+            for (line = y0; line < y1; line++)
             {
-                memset (m + (size_t) row * w + x0, 1, (size_t) (x1 - x0));
+                memset (m + (size_t) line * w + x0, 1, (size_t) (x1 - x0));
             }
         }
     }
@@ -132,7 +132,7 @@ static unsigned char *covered_mask (Display *d, Window root, int w, int h)
 /*
  * How much of the desktop on file the image in hand does not match, as a
  * percentage of the pixels that are desktop in both, with the first and last
- * row that differ. -1 when the file cannot be read or is of another screen,
+ * line that differ. -1 when the file cannot be read or is of another screen,
  * -2 when the file was fine and the windows left no desktop pixel to judge;
  * the two are different answers and the caller has to tell them apart.
  * *open is how much of the screen was judged at all.
@@ -142,7 +142,7 @@ static double compare_ppm (const char *path, bw_image *img,
                            int *y0, int *y1)
 {
     FILE *f;
-    unsigned char *row;
+    unsigned char *line;
     int w = 0, h = 0, mx = 0, x, y;
     long bad = 0, seen = 0;
 
@@ -161,8 +161,8 @@ static double compare_ppm (const char *path, bw_image *img,
 
         return -1;
     }
-    row = malloc ((size_t) w * 3);
-    if (row == NULL)
+    line = malloc ((size_t) w * 3);
+    if (line == NULL)
     {
         fclose (f);
 
@@ -170,9 +170,9 @@ static double compare_ppm (const char *path, bw_image *img,
     }
     for (y = 0; y < h; y++)
     {
-        if (fread (row, 3, (size_t) w, f) != (size_t) w)
+        if (fread (line, 3, (size_t) w, f) != (size_t) w)
         {
-            free (row);
+            free (line);
             fclose (f);
 
             return -1;
@@ -188,9 +188,9 @@ static double compare_ppm (const char *path, bw_image *img,
             }
             seen++;
             p = bw_pixel (img, x, y);
-            dr = (int) ((p >> 16) & 0xff) - row[x * 3];
-            dg = (int) ((p >> 8) & 0xff) - row[x * 3 + 1];
-            db = (int) (p & 0xff) - row[x * 3 + 2];
+            dr = (int) ((p >> 16) & 0xff) - line[x * 3];
+            dg = (int) ((p >> 8) & 0xff) - line[x * 3 + 1];
+            db = (int) (p & 0xff) - line[x * 3 + 2];
             if (abs (dr) + abs (dg) + abs (db) > TOL)
             {
                 bad++;
@@ -202,7 +202,7 @@ static double compare_ppm (const char *path, bw_image *img,
             }
         }
     }
-    free (row);
+    free (line);
     fclose (f);
     *open = 100.0 * (double) seen / ((double) w * h);
 
@@ -333,7 +333,7 @@ int main (int argc, char **argv)
     if (pc > BAD_PC)
     {
         printf ("%.2f%% of the desktop did not come back after the load, "
-                "rows %d to %d\n", pc, y0, y1);
+                "lines %d to %d\n", pc, y0, y1);
         rc = 1;
         goto out;
     }

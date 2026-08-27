@@ -14,7 +14,7 @@ DIR=${1:-$(dirname "$0")/results}
 # it in a report moves whenever the wording does.
 FILES=()
 for f in "$DIR"/*.txt; do
-    grep -q '^row: ' "$f" 2>/dev/null && FILES+=("$f")
+    grep -q '^test: ' "$f" 2>/dev/null && FILES+=("$f")
 done
 if [ "${#FILES[@]}" = 0 ]; then
     echo "no readable benchmark results in $DIR"
@@ -104,7 +104,7 @@ function line(first, arr,    i, s) {     # one line of the box
 
 # Higher is better for frames, lower for the rest, and both end up as "100% is
 # the best": the winner divides the others one way round or the other.
-function row(what, low,    i, v, best, cells) {
+function measure_line(what, low,    i, v, best, cells) {
     best = "";
     for (i = 1; i <= nkeys; i++)
     {
@@ -157,10 +157,10 @@ k == "" { next }
 /^energy:/   { sum[k, "energy"] += $2; cnt[k, "energy"]++ }
 /^speed:/    { sum[k, "frames per second"] += $2; cnt[k, "frames per second"]++ }
 
-# row: <watts> <cpu seconds> <seconds elapsed> <name>, as benchmark.sh writes
+# test: <watts> <cpu seconds> <seconds elapsed> <name>, as benchmark.sh writes
 # it. Only the total line is wanted here, and runs of the same desktop are
 # averaged, so each column carries its count.
-/^row: / {
+/^test: / {
     label = $5;
     for (i = 6; i <= NF; i++) label = label " " $i;
     # A desktop that skipped tests has a smaller total than one that ran them
@@ -179,17 +179,17 @@ END {
         exit 1;
     }
 
-    nrows = split ("frames per second,energy,power,desktop CPU", rows, ",");
+    nmeasures = split ("frames per second,energy,power,desktop CPU", measures, ",");
     for (i = 1; i <= nkeys; i++)
-        for (j = 1; j <= nrows; j++)
+        for (j = 1; j <= nmeasures; j++)
         {
-            one[order[i], rows[j]] = cnt[order[i], rows[j]] ?
-                sum[order[i], rows[j]] / cnt[order[i], rows[j]] : "-";
+            one[order[i], measures[j]] = cnt[order[i], measures[j]] ?
+                sum[order[i], measures[j]] / cnt[order[i], measures[j]] : "-";
         }
 
     # Wide enough for the longest thing in each column
     w0 = length ("measure");
-    for (j = 1; j <= nrows; j++) if (length (rows[j]) > w0) w0 = length (rows[j]);
+    for (j = 1; j <= nmeasures; j++) if (length (measures[j]) > w0) w0 = length (measures[j]);
     w0 += 2;
     for (i = 1; i <= nkeys; i++)
     {
@@ -214,7 +214,7 @@ END {
     for (i = 1; i <= nkeys; i++) hdr[i] = h4[order[i]];
     line("", hdr);
     rule("\342\224\234", "\342\224\274", "\342\224\244");
-    for (j = 1; j <= nrows; j++) row(rows[j], rows[j] != "frames per second");
+    for (j = 1; j <= nmeasures; j++) measure_line(measures[j], measures[j] != "frames per second");
     rule("\342\224\224", "\342\224\264", "\342\224\230");
     print "";
 

@@ -80,6 +80,8 @@ bw_win *bw_create (bw_win *parent, int x, int y, int w, int h,
     win->y = y;
     win->w = w;
     win->h = h;
+    win->aw = w;
+    win->ah = h;
     win->parent = parent;
     if (name != NULL)
     {
@@ -145,6 +147,12 @@ int bw_move_raw (bw_win *w, int x, int y, int width, int height, int way)
 void bw_where (bw_win *w, int *x, int *y, int *width, int *height)
 {
     ops->where (w, x, y, width, height);
+}
+
+void bw_asked_size (bw_win *w, int *width, int *height)
+{
+    if (width != NULL) *width = w->aw;
+    if (height != NULL) *height = w->ah;
 }
 
 int bw_where_live (bw_win *w)

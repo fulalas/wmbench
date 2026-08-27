@@ -88,7 +88,7 @@ cd "$(dirname "$0")" || exit 1
 make -s all 2>/dev/null || make all || exit 1
 
 # Before the first measurement: unlocking the sensor half way through a run
-# leaves the rows before it without power
+# leaves the tests before it without power
 power_unlock
 
 detect_wm || { echo "cannot tell what window manager this is"; exit 1; }
@@ -268,19 +268,26 @@ measure () {
 }
 
 REFUSED=(); REFUSED_LOGS=()
-ROW_OUT=""
-run_row () {
+TEST_OUT=""
+TILED=()
+note_tiled () {
+    local label=$1
+    shift
+    grep -qs SIZE-CHANGED "$@" && TILED+=("$label")
+}
+run_test () {
     local label=$1 name=$2 rc
     shift
     running "$label"
-    ROW_OUT=$(measure "$@"); rc=$?
+    TEST_OUT=$(measure "$@"); rc=$?
+    note_tiled "$label" "bm-$name.log"
     case $rc in
-        0) tally "$label" "$ROW_OUT";;
-        3) done_running; ROW_OUT=""
+        0) tally "$label" "$TEST_OUT";;
+        3) done_running; TEST_OUT=""
            REFUSED+=("$label"); REFUSED_LOGS+=("$name")
-           row_state "$label" not_done;;
-        *) done_running; ROW_OUT=""; LOADFAIL="$LOADFAIL $name"
-           row_state "$label" failed;;
+           test_state "$label" not_done;;
+        *) done_running; TEST_OUT=""; LOADFAIL="$LOADFAIL $name"
+           test_state "$label" failed;;
     esac
 }
 
@@ -301,19 +308,19 @@ DATA=()
 
 # The colour goes outside the padded field: inside it the escapes count as
 # characters and the column comes out short by their width
-row_state () {
+test_state () {
     local colour word
     case "$2" in
         failed)   colour=$RED;    word=failed;;
         not_done) colour=$YELLOW; word="not done";;
     esac
     done_running
-    # Without a data line the comparison drops the row as if it had never been
+    # Without a data line the comparison drops the test as if it had never been
     # asked for
     DATA+=("- - - $1")
     printf '%-18s%13s%16s%s%14s%s\n' "$1" "-" "-" "$colour" "$word" "$OFF"
 }
-print_row () {
+print_test () {
     local w c t
     done_running
     [ -n "$2" ] || return 0
@@ -326,15 +333,15 @@ print_row () {
 
 # Seconds add; watts are a rate and do not - they are kept as energy here and
 # divided by the total time at the end
-TCPU=0; TTIME=0; TENERGY=0; TROWS=0; TPOWER=1; TCPUOK=1
+TCPU=0; TTIME=0; TENERGY=0; TTESTS=0; TPOWER=1; TCPUOK=1
 tally () {
     local rw rc rt
     [ -n "$2" ] || return 0
-    print_row "$1" "$2"
+    print_test "$1" "$2"
     read -r rw rc rt <<< "$2"
     [ "$rw" = "-" ] && TPOWER=0
     [ "$rc" = "-" ] && TCPUOK=0
-    TROWS=$((TROWS + 1))
+    TTESTS=$((TTESTS + 1))
     read -r TCPU TTIME TENERGY <<< "$(awk -v c="$TCPU" -v t="$TTIME" \
         -v e="$TENERGY" -v rc="$rc" -v rt="$rt" -v rw="$rw" 'BEGIN{
             printf "%.2f %.1f %.3f", c + ((rc == "-") ? 0 : rc), t + rt,
@@ -344,45 +351,45 @@ tally () {
 echo
 printf '%-18s%13s%16s%14s\n' workload power "desktop CPU" "time elapsed"
 
-# print_row and not tally: idle is the baseline and no part of the total
-want idle && running "idle" && IDLE=$(idle_window "$IDLE_WINDOW") && print_row "idle" "$IDLE"
+# print_test and not tally: idle is the baseline and no part of the total
+want idle && running "idle" && IDLE=$(idle_window "$IDLE_WINDOW") && print_test "idle" "$IDLE"
 
 if want move; then
-    run_row "move" move "$MOVE_STEPS" ./tools/movebench 0 move 120
+    run_test "move" move "$MOVE_STEPS" ./tools/movebench 0 move 120
 fi
 if want resize; then
-    run_row "resize" resize "$RESIZE_CYCLES" ./tools/usagebench 0 3 resize
+    run_test "resize" resize "$RESIZE_CYCLES" ./tools/usagebench 0 3 resize
 fi
 if want dnd; then
-    run_row "drag and drop" dnd "$DND_PASSES" ./tools/usagebench 0 3 dnd
+    run_test "drag and drop" dnd "$DND_PASSES" ./tools/usagebench 0 3 dnd
 fi
 if want popups; then
-    run_row "popups" popups "$POP_CYCLES" ./tools/popbench 0 20 6
+    run_test "popups" popups "$POP_CYCLES" ./tools/popbench 0 20 6
 fi
 if want video; then
-    run_row "video" video "$VIDEO_FRAMES" ./tools/videobench 0 60
+    run_test "video" video "$VIDEO_FRAMES" ./tools/videobench 0 60
 fi
 if want argb; then
-    run_row "transparent window" argb "$ARGB_STEPS" ./tools/argbbench 0 120
+    run_test "transparent window" argb "$ARGB_STEPS" ./tools/argbbench 0 120
 fi
 if want windows; then
-    run_row "windows" windows "$WINDOWS_PASSES" ./tools/usagebench 0 3 windows
-    WINDOWS=$ROW_OUT
+    run_test "windows" windows "$WINDOWS_PASSES" ./tools/usagebench 0 3 windows
+    WINDOWS=$TEST_OUT
 fi
 if want scroll; then
-    run_row "scroll" scroll "$SCROLL_PASSES" ./tools/usagebench 0 3 scroll
+    run_test "scroll" scroll "$SCROLL_PASSES" ./tools/usagebench 0 3 scroll
 fi
 if want render; then
-    run_row "render 60 fps" render "$RENDER_FRAMES" ./tools/fsbench2 0 windowed 60
+    run_test "render 60 fps" render "$RENDER_FRAMES" ./tools/fsbench2 0 windowed 60
 fi
 
 # BENCH_LIGHT on purpose: with the heavy shader the application costs some
 # 14 ms a frame at 4K and compositing well under one, and the difference this
 # pair is here to show disappears into the noise
 if want fullscreen; then
-    run_row "fullscreen" fullscreen "$RENDER_FRAMES" \
+    run_test "fullscreen" fullscreen "$RENDER_FRAMES" \
         env BENCH_LIGHT=1 ./tools/fsbench2 0 fullscreen 60
-    run_row "fullscreen asked" fullscreen-asked "$RENDER_FRAMES" \
+    run_test "fullscreen asked" fullscreen-asked "$RENDER_FRAMES" \
         env BENCH_LIGHT=1 BENCH_BYPASS=1 ./tools/fsbench2 0 fullscreen 60
 fi
 
@@ -448,7 +455,7 @@ if want stress; then
                 SEND[$i]=$(now_s)
             elif ! kill -0 "${SP[$i]}" 2>/dev/null; then
                 # Why it left, not just that it did: 3 is the desktop refusing
-                # the work, which is a row not done, the same as on its own
+                # the work, which is a test not done, the same as on its own
                 wait "${SP[$i]}" 2>/dev/null; rc=$?
                 SEND[$i]=$(now_s)
                 [ "$rc" = 3 ] && MIX_REFUSED=1 || OK=0
@@ -472,13 +479,14 @@ if want stress; then
                      -v t0="$T0" -v t1="$T1" \
                      'BEGIN{printf "%s %s %.1f", w, c, t1 - t0}')
     else
-        # Every power_begin needs its power_end, failed row or not: left open,
+        # Every power_begin needs its power_end, failed test or not: left open,
         # the sensor's background sampler runs on through the next test and
         # that test's power_begin loses the handle on it
         power_end > /dev/null
     fi
+    note_tiled stress "${SL[@]}"
     # A load whose window never moved leaves a scene no other session had, so
-    # the row is not a result
+    # the test is not a result
     for l in "${SL[@]}"; do
         grep -q MOVE-NEVER-HAPPENED "$l" 2>/dev/null && MIX_REFUSED=1
     done
@@ -487,11 +495,11 @@ if want stress; then
     # reads as the mix falling apart when it was never allowed to run
     if [ "$OK" != 1 ]; then
         LOADFAIL="$LOADFAIL stress"
-        row_state stress failed
+        test_state stress failed
         STRESS=""
     elif [ "$MIX_REFUSED" = 1 ]; then
         REFUSED+=("stress"); REFUSED_LOGS+=("stress")
-        row_state stress not_done
+        test_state stress not_done
         STRESS=""
     elif [ -n "$STRESS_THIN" ]; then
         # The six are given work that has them finish together, so one leaving
@@ -500,11 +508,11 @@ if want stress; then
         echo "one of the six loads finished early, $STRESS_THIN% of the run" \
              "went with less on screen" >> "$STRESS_PRE-thin.log"
         LOADFAIL="$LOADFAIL stress"
-        row_state stress failed
+        test_state stress failed
         STRESS=""
     elif [ "$STACK_OK" = 0 ]; then
         REFUSED+=("stress"); REFUSED_LOGS+=("stress")
-        row_state stress not_done
+        test_state stress not_done
         STRESS=""
     fi
     tally "stress" "$STRESS"
@@ -523,13 +531,14 @@ if want uncapped; then
     running "speed"
     FPS=$(speed_run uncapped "$UNCAP_SECONDS" windowed)
     done_running
+    note_tiled uncapped bm-uncapped.log
     [ -n "$FPS" ] || LOADFAIL="$LOADFAIL uncapped"
 fi
 
-# A total over fewer rows is a smaller total: printing one for a session that
+# A total over fewer tests is a smaller total: printing one for a session that
 # skipped work hands it the win in every column it did not do
 NFAIL=$(set -- $LOADFAIL; echo $#)
-if [ "$TROWS" -gt 0 ] && { [ "$NFAIL" != 0 ] || [ "${#REFUSED[@]}" != 0 ]; }; then
+if [ "$TTESTS" -gt 0 ] && { [ "$NFAIL" != 0 ] || [ "${#REFUSED[@]}" != 0 ]; }; then
     echo "$RULE"
     MISSING=""
     [ "$NFAIL" != 0 ] && MISSING="$NFAIL failed"
@@ -537,7 +546,7 @@ if [ "$TROWS" -gt 0 ] && { [ "$NFAIL" != 0 ] || [ "${#REFUSED[@]}" != 0 ]; }; th
         MISSING="${MISSING:+$MISSING, }${#REFUSED[@]} not done"
     echo "no total: $MISSING"
 fi
-if [ "$TROWS" -gt 0 ] && [ -z "$LOADFAIL" ] && [ "${#REFUSED[@]}" = 0 ]; then
+if [ "$TTESTS" -gt 0 ] && [ -z "$LOADFAIL" ] && [ "${#REFUSED[@]}" = 0 ]; then
     echo "$RULE"
     if [ "$TPOWER" = 1 ]; then
         TW=$(awk -v e="$TENERGY" -v t="$TTIME" \
@@ -571,22 +580,30 @@ if [ "$POWER_OK" = 1 ] && [ -n "$BAT" ] && [ -n "$IDLE" ] && [ -n "$WINDOWS" ]; 
 fi
 
 # Anything that is not a measurement goes here, so nothing interrupts the table
-if [ -n "$LOADFAIL" ] || [ "${#REFUSED[@]}" != 0 ] || [ "$UNPROVEN" = 1 ]; then
+if [ -n "$LOADFAIL" ] || [ "${#REFUSED[@]}" != 0 ] || [ "$UNPROVEN" = 1 ] ||
+   [ "${#TILED[@]}" != 0 ]; then
     echo
     echo "== notes"
     note () { fold -s -w 74 | sed '2,$s/^/  /;s/ *$//'; }
     if [ -n "$LOADFAIL" ]; then
-        printf -- '- failed to run: %s. Log at the end of the report in the results folder\n' \
+        printf -- '- failed to run: %s\n' \
             "$(set -- $LOADFAIL; IFS=,; echo "$*" | sed 's/,/, /g')" |
             note | while IFS= read -r l; do red "$l"; done
     fi
     if [ "${#REFUSED[@]}" != 0 ]; then
-        printf -- '- not done due to limitations of the current window manager: %s. Log at the end of the report in the results folder\n' \
+        printf -- '- not done due to limitations of the current window manager: %s\n' \
             "$( IFS=,; echo "${REFUSED[*]}" | sed 's/,/, /g')" | note
+    fi
+    if [ -n "$LOADFAIL" ] || [ "${#REFUSED[@]}" != 0 ]; then
+        printf -- '%s\n' "- log at the end of the report in the results folder" |
+            note
     fi
     [ "$UNPROVEN" = 1 ] &&
         printf -- '%s\n' "- the window moves are unproven: no screenshot tool works here" |
             note
+    [ "${#TILED[@]}" != 0 ] &&
+        printf -- '- the window manager chose the window size, so these tests did more or less work than they do elsewhere and do not compare: %s\n' \
+            "$( IFS=,; echo "${TILED[*]}" | sed 's/,/, /g')" | note
 fi
 
 # compare_results.sh reads these lines and not the table, whose columns move
@@ -596,11 +613,11 @@ if [ "${#DATA[@]}" != 0 ]; then
     echo
     echo "== data"
     for r in "${DATA[@]}"; do
-        echo "row: $r"
+        echo "test: $r"
     done
 fi
 
-# Below "== data" so none of it reaches the screen. A refused row keeps its log
+# Below "== data" so none of it reaches the screen. A refused test keeps its log
 # too: the reason the desktop gave is in there and nowhere else.
 if [ -n "$LOADFAIL" ] || [ "${#REFUSED_LOGS[@]}" != 0 ]; then
     echo

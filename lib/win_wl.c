@@ -79,7 +79,7 @@ typedef struct {
 
 /* Where the raster was dirty at each recent present, so an older buffer is
    brought up to date by copying only what it missed: sending whole windows
-   instead would put a cost in the Wayland rows that no X11 row carries */
+   instead would put a cost in the Wayland tests that no X11 test carries */
 #define DMG_KEEP 16
 typedef struct { int x0, y0, x1, y1; } dmg_box;
 
@@ -906,12 +906,12 @@ static void raster_ensure (bw_win *win)
         }
         if (ww->raster != NULL && (win->flags & BW_KEEP))
         {
-            int row, keep = (oh < bh) ? oh : bh;
+            int line, keep = (oh < bh) ? oh : bh;
 
-            for (row = 0; row < keep; row++)
+            for (line = 0; line < keep; line++)
             {
-                memcpy (nr + (size_t) row * stride,
-                        ww->raster + (size_t) row * ww->buf.stride,
+                memcpy (nr + (size_t) line * stride,
+                        ww->raster + (size_t) line * ww->buf.stride,
                         (size_t) (ow < bw ? ow : bw) * 4);
             }
         }
@@ -929,13 +929,13 @@ static void raster_ensure (bw_win *win)
     }
     else if (stride != ww->buf.stride)
     {
-        int row, keep = (oh < bh) ? oh : bh;
+        int line, keep = (oh < bh) ? oh : bh;
 
-        /* Backwards, or the widened rows overwrite the ones still to move */
-        for (row = keep - 1; row > 0; row--)
+        /* Backwards, or the widened lines overwrite the ones still to move */
+        for (line = keep - 1; line > 0; line--)
         {
-            memmove (ww->raster + (size_t) row * stride,
-                     ww->raster + (size_t) row * ww->buf.stride,
+            memmove (ww->raster + (size_t) line * stride,
+                     ww->raster + (size_t) line * ww->buf.stride,
                      (size_t) (ow < bw ? ow : bw) * 4);
         }
     }
@@ -960,7 +960,7 @@ static void wl_present_ (bw_win *win)
     wl_win *ww = win->impl;
     wl_buf *b;
     dmg_box need;
-    int dx, dy, dw, dh, row;
+    int dx, dy, dw, dh, line;
     unsigned k;
 
     if (win->canvas || ww->surf == NULL || !ww->mapped || ww->gl ||
@@ -993,7 +993,7 @@ static void wl_present_ (bw_win *win)
      * What this buffer missed: it was last attached two or three presents
      * ago, so it needs everything drawn since then, not just this frame -
      * but only that, because copying whole windows is a client cost the
-     * X11 rows never pay for their one-request draws.
+     * X11 tests never pay for their one-request draws.
      */
     need.x0 = dx;
     need.y0 = dy;
@@ -1022,10 +1022,10 @@ static void wl_present_ (bw_win *win)
         if (need.x1 > ww->bw) need.x1 = ww->bw;
         if (need.y1 > ww->bh) need.y1 = ww->bh;
     }
-    for (row = need.y0; row < need.y1; row++)
+    for (line = need.y0; line < need.y1; line++)
     {
-        memcpy (b->px + (size_t) row * b->w + need.x0,
-                ww->raster + (size_t) row * ww->buf.stride + need.x0,
+        memcpy (b->px + (size_t) line * b->w + need.x0,
+                ww->raster + (size_t) line * ww->buf.stride + need.x0,
                 (size_t) (need.x1 - need.x0) * 4);
     }
     ww->dmg_seq++;

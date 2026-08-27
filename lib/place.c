@@ -5,8 +5,8 @@
  * from the window they belong to, and the mix composites a scene nobody
  * designed. The numbers still come out, for a different picture.
  *
- * So: ask, look, and say so. A row whose scene was never built is worth less
- * than no row at all, because it reads as a result.
+ * So: ask, look, and say so. A test whose scene was never built is worth less
+ * than no test at all, because it reads as a result.
  *
  * On Wayland believing is not enough - nothing says where a window is - so the
  * answer is proved with a screenshot once before the measurement and once
@@ -91,6 +91,27 @@ int bench_placed (bw_win *w, int ax, int ay, const char *what)
     fflush (stdout);
 
     return ok;
+}
+
+#define SIZE_SLACK 8
+
+int bench_sized (bw_win *w, const char *what)
+{
+    int aw, ah, gw, gh;
+
+    bw_sync ();
+    bw_asked_size (w, &aw, &ah);
+    bw_where (w, NULL, NULL, &gw, &gh);
+    if (gw >= aw - SIZE_SLACK && gw <= aw + SIZE_SLACK &&
+        gh >= ah - SIZE_SLACK && gh <= ah + SIZE_SLACK)
+    {
+        return 1;
+    }
+    printf ("size: %s asked %dx%d got %dx%d\n", what, aw, ah, gw, gh);
+    printf ("SIZE-CHANGED %s\n", what);
+    fflush (stdout);
+
+    return 0;
 }
 
 /*
@@ -267,7 +288,7 @@ static int shifted (int dx, int dy)
  * One attempt at one way of moving, waited for rather than slept through.
  * In the stress mix six programs put their windows up at the same moment and
  * the window manager answers a second late; a fixed sleep called that a
- * refusal and threw the row away. Polling returns as soon as the window has
+ * refusal and threw the test away. Polling returns as soon as the window has
  * gone, and only gives up when it really has not.
  */
 static int try_move (bw_win *w, int try_way, const char *name)
@@ -415,7 +436,7 @@ int bench_probe_move (bw_win *w, int x, int y, int width, int height)
 
     /*
      * Three times each way before giving up. Calling a session incapable of
-     * moving a window is a heavy thing to say - the row it belongs to is
+     * moving a window is a heavy thing to say - the test it belongs to is
      * dropped - and one slow answer while the desktop is still settling is
      * not proof. Each attempt that fails has waited its full two seconds
      * first, so a session that moves nothing spends about twelve seconds
@@ -456,7 +477,7 @@ int bench_probe_move (bw_win *w, int x, int y, int width, int height)
     fflush (stdout);
     /*
      * A session that honours neither way is left on the pager request, which
-     * is what the old callers did with a refusal: the row is usually dropped
+     * is what the old callers did with a refusal: the test is usually dropped
      * anyway, but the phases that carry on - resizing, drag and drop - must
      * not quietly change which path through the window manager they take.
      */

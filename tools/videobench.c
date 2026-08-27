@@ -110,16 +110,16 @@ int main (int argc, char **argv)
         /* A cheap moving pattern, the way a decoder hands over a new frame */
         for (y = 0; y < h; y++)
         {
-            unsigned int *row = (unsigned int *)
+            unsigned int *line = (unsigned int *)
                 (data + (size_t) y * stride);
             unsigned int v = (unsigned int) (((y + i * 3) & 0xff) << 8);
 
             for (x = 0; x < w; x += 4)
             {
-                row[x] = v | (unsigned) ((x + i) & 0xff);
-                row[x + 1] = v;
-                row[x + 2] = v | 0x400000;
-                row[x + 3] = v;
+                line[x] = v | (unsigned) ((x + i) & 0xff);
+                line[x + 1] = v;
+                line[x + 2] = v | 0x400000;
+                line[x + 3] = v;
             }
         }
         bw_frame_push (win);

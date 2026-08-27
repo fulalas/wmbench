@@ -771,6 +771,7 @@ static void dnd_phase (int bx, int by)
     bw_map (host);
     bw_sync ();
     usleep (300000);
+    bench_sized (host, "usagebench drop");
     /*
      * The size it really got, which a session that tiles decides for itself.
      * The views are laid out inside that rather than inside what was asked
@@ -1030,6 +1031,10 @@ static bw_win *make_window (int x, int y, const char *name, int stated)
     }
     w = bw_create (NULL, x, y, winw, winh, name, flags);
     bw_map (w);
+    if (stated)
+    {
+        bench_sized (w, name);
+    }
 
     return w;
 }
@@ -1333,7 +1338,7 @@ int main (int argc, char **argv)
         }
 
         /*
-         * The counts are what makes the row long enough to read a power figure
+         * The counts are what makes the test long enough to read a power figure
          * from. A pass of its own would do it too, but the pass after the
          * first has to open the pair again - its window was left minimized -
          * and that setup would land inside the measurement.
@@ -1382,7 +1387,7 @@ int main (int argc, char **argv)
      * Snapping and drag and drop are both built out of moves. Where nothing
      * moves, the windows never took the shape the phase is about - the icons
      * were dragged into a window sitting underneath the one they left - so
-     * the row is left empty rather than filled with a number for a scene
+     * the test is left empty rather than filled with a number for a scene
      * nobody designed. Resizing and scrolling do not move anything, and are
      * still worth measuring. On Wayland the same question is answered by the
      * compositor's configure events instead: a state asked for and never

@@ -6,8 +6,8 @@
  * off-by-a-region error: get it wrong and the visible part shows the wrong part
  * of the window, shifted.
  *
- * The cells are coloured by column and row together, so the error shows in both
- * directions: a pattern of rows alone says nothing about the left edge, since
+ * The cells are coloured by column and line together, so the error shows in both
+ * directions: a pattern of lines alone says nothing about the left edge, since
  * sliding it sideways lands on the same colours. With the window at
  * -OFFX,-OFFY, the top left of the screen must show the cell belonging to
  * window pixel OFFX,OFFY, not the one belonging to 0,0.
@@ -157,7 +157,7 @@ int main (int argc, char **argv)
         if (wrong >= 0)
         {
             bad++;
-            printf ("round %d: wrong part of the window visible, from row %d\n",
+            printf ("round %d: wrong part of the window visible, from line %d\n",
                     r + 1, wrong);
         }
         else if (seen == 0)

@@ -94,7 +94,7 @@ static bw_image *region_from_ppm (const char *path, int x, int y, int w, int h,
 {
     FILE *f;
     bw_image *img = NULL;
-    unsigned char *row = NULL, *data = NULL;
+    unsigned char *line = NULL, *data = NULL;
     int sw, sh, maxval, ry, rx;
     int px = x * scale, py = y * scale;
 
@@ -133,15 +133,15 @@ static bw_image *region_from_ppm (const char *path, int x, int y, int w, int h,
     }
 
     data = malloc ((size_t) w * h * 3);
-    row = malloc ((size_t) sw * 3);
-    if (data == NULL || row == NULL)
+    line = malloc ((size_t) sw * 3);
+    if (data == NULL || line == NULL)
     {
         goto out;
     }
 
     for (ry = 0; ry < py + h * scale; ry++)
     {
-        if (fread (row, 3, (size_t) sw, f) != (size_t) sw)
+        if (fread (line, 3, (size_t) sw, f) != (size_t) sw)
         {
             goto out;
         }
@@ -152,7 +152,7 @@ static bw_image *region_from_ppm (const char *path, int x, int y, int w, int h,
         for (rx = 0; rx < w; rx++)
         {
             memcpy (data + ((size_t) ((ry - py) / scale) * w + rx) * 3,
-                    row + (size_t) (px + rx * scale) * 3, 3);
+                    line + (size_t) (px + rx * scale) * 3, 3);
         }
     }
 
@@ -167,7 +167,7 @@ static bw_image *region_from_ppm (const char *path, int x, int y, int w, int h,
 
 out:
     free (data);
-    free (row);
+    free (line);
     fclose (f);
 
     return img;
@@ -204,7 +204,7 @@ bw_image *capture_via_cmd (int x, int y, int w, int h, int scale,
 int capture_write_ppm (const char *path, const bw_image *img)
 {
     FILE *f;
-    unsigned char *row;
+    unsigned char *line;
     int x, y, ok = 1;
 
     f = fopen (path, "wb");
@@ -212,8 +212,8 @@ int capture_write_ppm (const char *path, const bw_image *img)
     {
         return 0;
     }
-    row = malloc ((size_t) img->width * 3);
-    if (row == NULL)
+    line = malloc ((size_t) img->width * 3);
+    if (line == NULL)
     {
         fclose (f);
 
@@ -226,13 +226,13 @@ int capture_write_ppm (const char *path, const bw_image *img)
         {
             unsigned long p = bw_pixel (img, x, y);
 
-            row[x * 3] = (p >> 16) & 0xff;
-            row[x * 3 + 1] = (p >> 8) & 0xff;
-            row[x * 3 + 2] = p & 0xff;
+            line[x * 3] = (p >> 16) & 0xff;
+            line[x * 3 + 1] = (p >> 8) & 0xff;
+            line[x * 3 + 2] = p & 0xff;
         }
-        ok = fwrite (row, 3, (size_t) img->width, f) == (size_t) img->width;
+        ok = fwrite (line, 3, (size_t) img->width, f) == (size_t) img->width;
     }
-    free (row);
+    free (line);
 
     return fclose (f) == 0 && ok;
 }

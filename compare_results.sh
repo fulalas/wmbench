@@ -14,7 +14,7 @@ DIR=${1:-$(dirname "$0")/results}
 # it in a report moves whenever the wording does.
 FILES=()
 for f in "$DIR"/*.txt; do
-    grep -q '^row: ' "$f" 2>/dev/null && FILES+=("$f")
+    grep -q '^test: ' "$f" 2>/dev/null && FILES+=("$f")
 done
 if [ "${#FILES[@]}" = 0 ]; then
     echo "no readable benchmark results in $DIR"
@@ -158,16 +158,16 @@ function table(idx, title,    i, j, k2, v, best, cells, hdr, blank) {
     for (i = 1; i <= nkeys; i++) hdr[i] = h4[order[i]];
     line("", hdr);
     rule("\342\224\234", "\342\224\274", "\342\224\244");
-    for (j = 1; j <= nrows; j++)
+    for (j = 1; j <= ntests; j++)
     {
-        if (rows[j] == "total")
+        if (tests[j] == "total")
         {
             rule("\342\224\234", "\342\224\274", "\342\224\244");
         }
         best = "";
         for (i = 1; i <= nkeys; i++)
         {
-            v = val[order[i], rows[j], idx];
+            v = val[order[i], tests[j], idx];
             if (v != "" && v != "-" && (best == "" || v + 0 < best))
             {
                 best = v + 0;
@@ -175,7 +175,7 @@ function table(idx, title,    i, j, k2, v, best, cells, hdr, blank) {
         }
         for (i = 1; i <= nkeys; i++)
         {
-            v = val[order[i], rows[j], idx];
+            v = val[order[i], tests[j], idx];
             if (v == "") v = "-";
             # The bold codes are not printed characters, so the cell is padded
             # first and dressed afterwards, or every column would come out short
@@ -188,10 +188,10 @@ function table(idx, title,    i, j, k2, v, best, cells, hdr, blank) {
                 cells[i] = pad(v, wid[i]);
             }
         }
-        # Watts are a rate: the last row of the power table is the average
+        # Watts are a rate: the last line of the power table is the average
         # over the run, and only the seconds ever add up
-        printf "\342\224\202%s", pad((rows[j] == "total" && idx == 1) ?
-                                     "average" : rows[j], w0);
+        printf "\342\224\202%s", pad((tests[j] == "total" && idx == 1) ?
+                                     "average" : tests[j], w0);
         for (i = 1; i <= nkeys; i++) printf "\342\224\202%s", cells[i];
         print "\342\224\202";
     }
@@ -226,12 +226,12 @@ k == "" { next }
 /^energy:/   { esum[k] += $2; ecnt[k]++ }
 /^speed:/    { ssum[k] += $2; scnt[k]++ }
 
-# row: <watts> <cpu seconds> <seconds elapsed> <name>, as benchmark.sh writes
+# test: <watts> <cpu seconds> <seconds elapsed> <name>, as benchmark.sh writes
 # it. Runs of the same desktop are averaged, so each column carries its count.
-/^row: / {
+/^test: / {
     label = $5;
     for (i = 6; i <= NF; i++) label = label " " $i;
-    if (!(label in rowseen)) { rowseen[label] = 1; rows[++nrows] = label }
+    if (!(label in testseen)) { testseen[label] = 1; tests[++ntests] = label }
     if ($2 != "-") { sum[k, label, 1] += $2; cnt[k, label, 1]++ }
     if ($3 != "-") { sum[k, label, 2] += $3; cnt[k, label, 2]++ }
 }
@@ -245,33 +245,33 @@ END {
     }
 
     # The total goes last, under a rule of its own
-    for (j = 1; j <= nrows; j++) if (rows[j] == "total") tj = j;
+    for (j = 1; j <= ntests; j++) if (tests[j] == "total") tj = j;
     if (tj)
     {
-        for (j = tj; j < nrows; j++) rows[j] = rows[j + 1];
-        rows[nrows] = "total";
+        for (j = tj; j < ntests; j++) tests[j] = tests[j + 1];
+        tests[ntests] = "total";
     }
 
     for (i = 1; i <= nkeys; i++)
     {
         k2 = order[i];
-        for (j = 1; j <= nrows; j++)
+        for (j = 1; j <= ntests; j++)
         {
             for (n = 1; n <= 2; n++)
             {
-                val[k2, rows[j], n] = cnt[k2, rows[j], n] ?
-                    sprintf ("%.2f", sum[k2, rows[j], n] / cnt[k2, rows[j], n]) : "-";
+                val[k2, tests[j], n] = cnt[k2, tests[j], n] ?
+                    sprintf ("%.2f", sum[k2, tests[j], n] / cnt[k2, tests[j], n]) : "-";
             }
             # Both columns: watts alone is "-" on every run whose machine has
             # no power sensor, tests run and all
-            if (rows[j] != "total" && val[k2, rows[j], 1] == "-" &&
-                val[k2, rows[j], 2] == "-") short[k2] = 1;
+            if (tests[j] != "total" && val[k2, tests[j], 1] == "-" &&
+                val[k2, tests[j], 2] == "-") short[k2] = 1;
         }
     }
 
     # Wide enough for the longest thing in each column
     w0 = length ("workload");
-    for (j = 1; j <= nrows; j++) if (length (rows[j]) > w0) w0 = length (rows[j]);
+    for (j = 1; j <= ntests; j++) if (length (tests[j]) > w0) w0 = length (tests[j]);
     w0 += 2;
     for (i = 1; i <= nkeys; i++)
     {

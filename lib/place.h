@@ -33,6 +33,9 @@
  */
 int bench_placed (bw_win *, int ax, int ay, const char *what);
 
+/* Managed windows only: nothing resizes an unmanaged one */
+int bench_sized (bw_win *, const char *what);
+
 /* That proof costs about 0.3 s on Wayland, so it must not be taken between
    MEASURE-START and MEASURE-END. Turn it off around a measured phase; the
    "place:" line then says the position is the protocol's word. */

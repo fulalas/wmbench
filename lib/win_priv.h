@@ -10,6 +10,7 @@ struct bw_win {
     char name[64];
     /* believed geometry: what was asked for, then what the session said */
     int x, y, w, h;
+    int aw, ah;
     bw_win *parent;
     void *impl;                 /* the backend's own state */
 };
