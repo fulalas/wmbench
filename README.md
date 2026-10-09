@@ -143,3 +143,10 @@ a single value.
 
 The CPU sensor might be root-only on some machines. In this case, you are asked
 whether to open it with root, before anything is measured.
+
+## License
+
+wmbench is free software, released under the GNU General Public License,
+version 3 or later (GPL-3.0-or-later). The Wayland protocol files in
+`lib/protocols/` keep their own MIT-style licenses, which are compatible with
+the GPL.
