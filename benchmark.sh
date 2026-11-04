@@ -1,6 +1,6 @@
 #!/bin/bash
 set -u
-ALL="idle move resize dnd popups video argb windows scroll render fullscreen uncapped stress"
+ALL="idle move resize dnd popups video argb windows scroll render fullscreen uncapped latency stress"
 
 usage_help () {
     cat <<EOF
@@ -31,12 +31,16 @@ tests:
               _NET_WM_BYPASS_COMPOSITOR on X11, and on Wayland by declaring
               the whole surface opaque
   uncapped    the frame rate flat out, windowed. Runs last
+  latency     how long a frame takes from the moment a window hands it over
+              to the moment it is on the screen, as the compositor reports it.
+              Wayland only, skipped on X11
   stress      everything at once: many windows, one moving, one resizing,
               popups, a translucent window and a GL render
 
 Every test does the same fixed amount of work in every session, however long
 that takes, so power and CPU time compare directly. The one exception is
-uncapped, which is deliberately flat out and reports only frames per second.
+uncapped, which is deliberately flat out and reports only frames per second,
+and latency, which reports only milliseconds.
 
 Desktop CPU is the total seconds all CPU cores spent by the desktop drawing
 and managing windows: the compositor on Wayland, and on X11 the window
@@ -63,7 +67,7 @@ set -- ${ARGS[@]+"${ARGS[@]}"}
 
 TESTS=${*:-$ALL}
 for t in $TESTS; do
-    case "$t" in idle|move|resize|dnd|popups|video|argb|windows|scroll|render|fullscreen|uncapped|stress) ;;
+    case "$t" in idle|move|resize|dnd|popups|video|argb|windows|scroll|render|fullscreen|uncapped|latency|stress) ;;
         *) echo "unknown test: $t"; echo; usage_help; exit 1;;
     esac
 done
@@ -80,6 +84,7 @@ DND_PASSES=${DND_PASSES:-1}
 WINDOWS_PASSES=${WINDOWS_PASSES:-1}
 SCROLL_PASSES=${SCROLL_PASSES:-1}
 UNCAP_SECONDS=${UNCAP_SECONDS:-16}
+LATENCY_SECONDS=${LATENCY_SECONDS:-10}
 
 
 source "$(dirname "$0")/lib/common.sh"
@@ -174,6 +179,7 @@ for t in $TESTS; do
         render)   EST=$((EST + RENDER_FRAMES / 60 + 10));;
         fullscreen) EST=$((EST + 2 * (RENDER_FRAMES / 60 + 10)));;
         uncapped) EST=$((EST + UNCAP_SECONDS + 6));;
+        latency)  EST=$((EST + LATENCY_SECONDS + 5));;
         stress)   EST=$((EST + RENDER_FRAMES / 60 + 30));;
     esac
 done
@@ -535,6 +541,19 @@ if want uncapped; then
     [ -n "$FPS" ] || LOADFAIL="$LOADFAIL uncapped"
 fi
 
+if want latency; then
+    running "latency"
+    sleep 3
+    ./tools/latbench "$LATENCY_SECONDS" > bm-latency.log 2>&1; rc=$?
+    done_running
+    case $rc in
+        0) LATENCY=$(awk '/^MEDIAN/{m=$2} /^P90/{p=$2} END{if (m != "") print m, p}' bm-latency.log)
+           [ -n "$LATENCY" ] || LOADFAIL="$LOADFAIL latency";;
+        3) ;;
+        *) LOADFAIL="$LOADFAIL latency";;
+    esac
+fi
+
 # A total over fewer tests is a smaller total: printing one for a session that
 # skipped work hands it the win in every column it did not do
 NFAIL=$(set -- $LOADFAIL; echo $#)
@@ -566,6 +585,11 @@ fi
 if [ -n "$FPS" ]; then
     echo
     echo "speed:   $FPS fps windowed"
+fi
+if [ -n "${LATENCY:-}" ]; then
+    read -r lmed lp90 <<< "$LATENCY"
+    [ -n "$FPS" ] || echo
+    echo "latency: $lmed ms frame to screen (median, 90% within $lp90 ms)"
 fi
 
 BAT=$(cat /sys/class/power_supply/BAT*/energy_full 2>/dev/null | head -1)

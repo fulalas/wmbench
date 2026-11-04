@@ -66,7 +66,10 @@ on a single-monitor desktop.
 ## benchmark.sh
 
 Every workload does a **fixed amount of work**, so two sessions compare
-directly. The frame rate is the exception: flat out, windowed, once, last.
+directly. The frame rate is the exception: flat out, windowed, once, last. So
+is latency: a window draws for 10 seconds and the compositor reports, through
+wp-presentation, when each frame reached the screen; the median and the 90th
+percentile are printed. Wayland only.
 
 The fullscreen pair - the same frames as they come, then asking compositing to
 step aside - is read in power, not frames, because the saving is the

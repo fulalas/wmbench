@@ -225,6 +225,7 @@ k == "" { next }
 # Averaged like the rest
 /^energy:/   { esum[k] += $2; ecnt[k]++ }
 /^speed:/    { ssum[k] += $2; scnt[k]++ }
+/^latency:/  { lsum[k] += $2; lcnt[k]++ }
 
 # test: <watts> <cpu seconds> <seconds elapsed> <name>, as benchmark.sh writes
 # it. Runs of the same desktop are averaged, so each column carries its count.
@@ -290,9 +291,11 @@ END {
         k2 = order[i];
         one[k2, "fps"] = scnt[k2] ? sprintf ("%.2f", ssum[k2] / scnt[k2]) : "-";
         one[k2, "energy"] = ecnt[k2] ? sprintf ("%.0f", esum[k2] / ecnt[k2]) : "-";
+        one[k2, "latency"] = lcnt[k2] ? sprintf ("%.2f", lsum[k2] / lcnt[k2]) : "-";
     }
 
     single("fps", "Frames per second, windowed", 0);
+    single("latency", "Latency, frame to screen (ms)", 1);
     single("energy", "Energy (J)", 1);
     table(1, "Power (W)");
     table(2, "Desktop CPU (s)");

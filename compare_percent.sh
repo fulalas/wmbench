@@ -156,6 +156,7 @@ k == "" { next }
 }
 /^energy:/   { sum[k, "energy"] += $2; cnt[k, "energy"]++ }
 /^speed:/    { sum[k, "frames per second"] += $2; cnt[k, "frames per second"]++ }
+/^latency:/  { sum[k, "latency"] += $2; cnt[k, "latency"]++ }
 
 # test: <watts> <cpu seconds> <seconds elapsed> <name>, as benchmark.sh writes
 # it. Only the total line is wanted here, and runs of the same desktop are
@@ -179,7 +180,7 @@ END {
         exit 1;
     }
 
-    nmeasures = split ("frames per second,energy,power,desktop CPU", measures, ",");
+    nmeasures = split ("frames per second,latency,energy,power,desktop CPU", measures, ",");
     for (i = 1; i <= nkeys; i++)
         for (j = 1; j <= nmeasures; j++)
         {
@@ -219,7 +220,8 @@ END {
     print "";
 
     print "* a line reads: 100% is the best figure, 50% is half as good";
-    print "* frames per second is the uncapped test, the other three are the";
+    print "* frames per second is the uncapped test, latency the latency test,";
+    print "  the other three are the";
     print "  totals of every test that ran";
 
     s = "";

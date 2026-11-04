@@ -41,7 +41,7 @@ INC      = -Ilib $(WL_CFLAGS) $(GL_CFLAGS)
 PROTOS = xdg-shell wlr-layer-shell-unstable-v1 xdg-activation-v1 \
          alpha-modifier-v1 xdg-output-unstable-v1 \
          xdg-decoration-unstable-v1 xx-zones-v1 idle-inhibit-unstable-v1 \
-         wlr-foreign-toplevel-management-unstable-v1
+         wlr-foreign-toplevel-management-unstable-v1 presentation-time
 PROTO_SRC = $(PROTOS:%=lib/protocols/%-protocol.c)
 PROTO_HDR = $(PROTOS:%=lib/protocols/%-client-protocol.h)
 
@@ -67,7 +67,7 @@ LIBS = $(X11) $(WL)
 
 TOOLS  = tools/cmcheck tools/displayinfo tools/restack tools/fsbench2 \
          tools/movebench tools/transbench tools/manywin tools/popbench \
-         tools/argbbench tools/videobench tools/usagebench
+         tools/argbbench tools/videobench tools/usagebench tools/latbench
 CHECKS = checks/motion_check checks/stale_check checks/pop_check \
          checks/suspend_check checks/shape_check checks/resize_check \
          checks/offscreen_check checks/iconify_check checks/leftover_check
@@ -107,6 +107,8 @@ tools/videobench: tools/videobench.c $(WIN) $(WINH) $(GATE)
 	$(CC) $(CFLAGS) $(INC) -o $@ $< $(WIN) $(GATE) $(LIBS)
 tools/usagebench: tools/usagebench.c $(WIN) $(WINH) $(GATE)
 	$(CC) $(CFLAGS) $(INC) -o $@ $< $(WIN) $(GATE) $(LIBS)
+tools/latbench: tools/latbench.c lib/protocols/xdg-shell-protocol.c lib/protocols/presentation-time-protocol.c $(PROTO_HDR)
+	$(CC) $(CFLAGS) $(INC) -o $@ $< lib/protocols/xdg-shell-protocol.c lib/protocols/presentation-time-protocol.c $(WL)
 
 checks/stale_check checks/pop_check checks/suspend_check \
 checks/resize_check checks/offscreen_check checks/iconify_check: %: %.c $(WIN) $(WINH)
