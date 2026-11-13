@@ -33,7 +33,7 @@ make -s all 2>/dev/null || make all || exit 1
 detect_wm || { echo "cannot tell what window manager this is"; exit 1; }
 ST=$(session_type)
 DE=$(echo "${XDG_CURRENT_DESKTOP:-unknown}" | tr '[:upper:]' '[:lower:]' | tr ':/ ' '-')
-WMVER=$(wm_version | tr '-' '.')
+WMVER=${WM_VERSION//-/.}
 if [ -z "${BENCH_RECORD_CMD:-}" ]; then
     command -v gpu-screen-recorder >/dev/null ||
         { echo "gpu-screen-recorder not found; set BENCH_RECORD_CMD"; exit 1; }
@@ -100,7 +100,7 @@ keep_awake
 
 {
     echo "session:    $ST (${XDG_CURRENT_DESKTOP:-unknown desktop})"
-    echo "compositor: $WM_NAME $(wm_version)"
+    echo "compositor: $WM_NAME $WM_VERSION"
     echo "display:    $(display_info)"
     echo "recorder:   ${BENCH_RECORD_CMD:-gpu-screen-recorder} at $FPS fps"
 } | tee "$MAN"

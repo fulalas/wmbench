@@ -65,7 +65,7 @@ WINH = lib/win.h lib/win_priv.h lib/draw.h lib/capture.h lib/place.h \
 GATE = lib/gate.o
 LIBS = $(X11) $(WL)
 
-TOOLS  = tools/cmcheck tools/displayinfo tools/restack tools/fsbench2 \
+TOOLS  = tools/wmpid tools/displayinfo tools/restack tools/fsbench2 \
          tools/movebench tools/transbench tools/manywin tools/popbench \
          tools/argbbench tools/videobench tools/usagebench tools/latbench
 CHECKS = checks/motion_check checks/stale_check checks/pop_check \
@@ -80,8 +80,7 @@ all: $(TOOLS) $(CHECKS)
 $(WIN) $(GATE): %.o: %.c $(WINH) lib/gate.h
 	$(CC) $(CFLAGS) $(INC) -c -o $@ $<
 
-# Does anything own the compositing selection on this display? X11 only.
-tools/cmcheck: tools/cmcheck.c
+tools/wmpid: tools/wmpid.c
 	$(CC) $(CFLAGS) $(INC) -o $@ $< -lX11
 # The screen as the compositor describes it. Its own small connection: it
 # also has to answer during an XWayland run, where the window layer is X11.

@@ -50,7 +50,7 @@ trap let_sleep EXIT
 keep_awake
 
 echo "session:    $ST (${XDG_CURRENT_DESKTOP:-unknown desktop})"
-echo "compositor: $WM_NAME $(wm_version) (pid ${WM_PID:-unknown})"
+echo "compositor: $WM_NAME $WM_VERSION (pid ${WM_PID:-unknown})"
 
 PIXELS=1
 if [ "$ST" = wayland ]; then

@@ -105,7 +105,7 @@ RUN_AS=$ST
 
 DE=$(echo "${XDG_CURRENT_DESKTOP:-unknown}" | tr '[:upper:]' '[:lower:]' | tr ':/ ' '-')
 # A dash in the version would read as another field in the file name
-WMVER=$(wm_version | tr '-' '.')
+WMVER=${WM_VERSION//-/.}
 OUT="results/benchmark-$(date +%Y%m%d-%H%M%S)-$(hostname)-$DE-$WM_NAME-${WMVER:-unknown}-$RUN_AS.txt"
 mkdir -p results
 tee_report "$OUT"
@@ -140,12 +140,12 @@ fi
 # On X11 the compositor announces itself by owning a selection, which has to
 # be asked for by name and cannot be read off the root window; a Wayland
 # compositor always composites
-if [ "$ST" != x11 ] || ./tools/cmcheck >/dev/null 2>&1; then
+if [ "$ST" != x11 ] || ./tools/wmpid >/dev/null 2>&1; then
     COMPOSITING=on
 else
     COMPOSITING=OFF
 fi
-echo "compositor: $WM_NAME $(wm_version) (compositing $COMPOSITING)"
+echo "compositor: $WM_NAME $WM_VERSION (compositing $COMPOSITING)"
 [ -z "$WM_PIDS" ] &&
     echo "            part of the desktop's processes cannot be seen, so the" &&
     echo "            CPU column is left empty rather than filled with a" &&

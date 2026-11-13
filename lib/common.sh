@@ -309,11 +309,16 @@ wm_cpu () {
 # Asked of the running binary itself, so a locally built one answers for
 # itself, and only of the binary by name when the process is not visible
 wm_version () {
-    local exe
-    exe=$(readlink -f "/proc/$WM_PID/exe" 2>/dev/null)
-    [ -x "$exe" ] || exe=$(command -v "$WM_NAME") || return 0
-    { "$exe" --version 2>/dev/null || "$exe" -v 2>/dev/null; } | head -2 |
-        grep -oE '[0-9]+\.[0-9]+[0-9A-Za-z.+~-]*' | head -1
+    local exe v out=""
+    for exe in $WM_EXES; do
+        v=""
+        exe=$(type -P "$exe") &&
+            v=$({ "$exe" --version 2>/dev/null || "$exe" -v 2>/dev/null; } |
+                head -2 | grep -oE '[0-9]+\.[0-9]+[0-9A-Za-z.+~-]*' | head -1)
+        out="$out+${v:-unknown}"
+    done
+    [[ $out =~ [0-9] ]] && echo "${out#+}"
+    return 0
 }
 
 # On Wayland the compositor itself is asked over wl_output, which every
@@ -433,9 +438,8 @@ backend_type () {
     if [ "${BENCH_BACKEND:-}" = x11 ]; then echo x11; else session_type; fi
 }
 
-# The name is on the window named by _NET_SUPPORTING_WM_CHECK, the pid only
-# sometimes: some leave _NET_WM_PID unset. Echoed on two lines, because a name
-# has spaces in it often enough and a missing pid leaves nothing.
+# Echoed on two lines, because a name has spaces in it often enough and a
+# missing pid leaves nothing.
 x11_wm_check () {
     local win name pid
     win=$(xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null |
@@ -443,8 +447,10 @@ x11_wm_check () {
     [ -n "$win" ] || return 1
     name=$(xprop -id "$win" _NET_WM_NAME 2>/dev/null |
            sed -n 's/.*= "\(.*\)"$/\1/p')
-    [ -n "$name" ] || return 1
-    pid=$(xprop -id "$win" _NET_WM_PID 2>/dev/null | grep -oE '[0-9]+$')
+    pid=$(./tools/wmpid "$win" 2>/dev/null)
+    [ -n "$pid" ] ||
+        pid=$(xprop -id "$win" _NET_WM_PID 2>/dev/null | grep -oE '[0-9]+$')
+    [ -n "$pid$name" ] || return 1
     printf '%s\n%s\n' "$pid" "$name"
 }
 
@@ -458,7 +464,7 @@ x11_wm_check () {
 # the socket. Where the lock is all there is, the compositor is the oldest of
 # them, having made it before starting anything.
 wayland_socket_owner () {
-    local sock ino p c pid name cname
+    local sock ino p c pid pids parents name
     local -a targets
     [ -n "${WAYLAND_DISPLAY:-}" ] || return 1
     sock=$WAYLAND_DISPLAY
@@ -477,23 +483,23 @@ wayland_socket_owner () {
     for p in "${targets[@]}"; do
         # One find rather than a readlink per descriptor: this runs before the
         # first measurement, but a thousand forks is still a thousand forks
-        pid=$(find /proc/[0-9]*/fd -lname "$p" -print 2>/dev/null |
-              awk -F/ '{print $3}' | sort -n | head -1)
-        [ -n "$pid" ] || continue
+        pids=$(find /proc/[0-9]*/fd -lname "$p" -print 2>/dev/null |
+               awk -F/ '{print $3}' | sort -nu)
+        [ -n "$pids" ] || continue
+        pid=${pids%%$'\n'*}
+        if [ "$p" != "$sock.lock" ]; then
+            parents=$(for c in $pids; do
+                          while c=$(awk '/^PPid:/ { print $2 }' \
+                                    "/proc/$c/status") && [ "${c:-0}" -gt 1 ]; do
+                              echo "$c"
+                          done
+                      done 2>/dev/null)
+            for c in $pids; do
+                grep -qx "$c" <<< "$parents" || { pid=$c; break; }
+            done
+        fi
         [ -r "/proc/$pid/comm" ] || continue
         read -r name < "/proc/$pid/comm"
-        # Some desktops make the socket in a wrapper and hand the fd to the
-        # compositor, and the wrapper then sits idle with the CPU column
-        # reading 0.00. A wrapper is named for what it wraps with something on
-        # the end, so only a child whose name starts the owner's is taken for
-        # one - a compositor's other children must not be
-        for c in $(pgrep -P "$pid" 2>/dev/null); do
-            [ -r "/proc/$c/comm" ] || continue
-            read -r cname < "/proc/$c/comm"
-            case "$name" in
-                "$cname"?*) pid=$c; name=$cname; break;;
-            esac
-        done
         printf '%s\n%s\n' "$pid" "$name"
 
         return 0
@@ -532,100 +538,53 @@ x_server_pid () {
     echo "$one"
 }
 
-# The short name used in the result file names, so no spaces and no capitals
 wm_canon () {
-    local n=${1,,}
-
-    case "$n" in
-        *xfwm*)                 echo xfwm4;;
-        *compiz*)               echo compiz;;
-        *kwin*)                 echo kwin;;
-        *muffin*|*cinnamon*)    echo muffin;;
-        *mutter*|*gnome*shell*) echo mutter;;
-        *marco*)                echo marco;;
-        *metacity*)             echo metacity;;
-        *openbox*)              echo openbox;;
-        *labwc*)                echo labwc;;
-        # Anything else keeps its own name, minus what would break a file name
-        *)                      echo "${n//[^a-z0-9.]/_}";;
+    local pid=$1 name=$2 exe=""
+    if [ -n "$pid" ]; then
+        read -r name 2>/dev/null < "/proc/$pid/comm"
+        exe=$(readlink "/proc/$pid/exe" 2>/dev/null)
+        exe=${exe% (deleted)}
+        case "${exe##*/}" in
+            "$name"*) name=${exe##*/};;
+            *)        exe="";;
+        esac
+        name=${name#.}
+        name=${name%-wrapped}
+    fi
+    case "$name" in
+        gnome-shell) name=mutter; exe="";;
+        cinnamon)    name=muffin; exe="";;
     esac
+    name=${name//[^A-Za-z0-9._-]/_}
+    name=${name,,}
+    printf '%s\n%s\n' "$name" "${exe:-$name}"
 }
 
-# Sets WM_NAME, WM_PID and WM_PIDS, which is everything whose CPU time is the
-# desktop's.
-#
-# The running window manager is asked first, because it is the only source that
-# keeps up when one replaces another mid-session: the desktop still names the
-# one it started with, and going by that reports a session as running something
-# that is not in it. Only when nothing answers does the desktop name candidates,
-# and then only a name with a live process behind it is taken.
+# Sets WM_NAME, WM_VERSION, WM_PID and WM_PIDS, which is everything whose CPU
+# time is the desktop's.
 detect_wm () {
-    local desktop=${XDG_CURRENT_DESKTOP:-} st p cand="" dcand="" name="" pid=""
-    local helpers=""
+    local st name="" pid="" p exe
     st=$(session_type)
-    WM_NAME=""; WM_PID=""; WM_PIDS=""
+    WM_NAME=""; WM_VERSION=""; WM_PID=""; WM_PIDS=""; WM_EXES=""
 
     if [ "$st" = x11 ]; then
         { read -r pid; read -r name; } <<< "$(x11_wm_check)"
     else
         { read -r pid; read -r name; } <<< "$(wayland_socket_owner)"
     fi
-    [ -n "$name" ] && WM_NAME=$(wm_canon "$name")
-    # A pid nothing can be read from is no pid: containers and some setups
-    # hide the process, and it is then worth looking for it by name below
     [ -n "$pid" ] && [ -r "/proc/$pid/stat" ] && WM_PID=$pid
+    { read -r WM_NAME; read -r WM_EXES; } <<< "$(wm_canon "$WM_PID" "$name")"
 
-    case "$desktop" in
-        *GNOME*)                 dcand="mutter gnome-shell";;
-        *KDE*)                   dcand="kwin_wayland kwin_x11";;
-        *X-Cinnamon*|*Cinnamon*) dcand="muffin cinnamon";;
-        *COSMIC*)                dcand="cosmic-comp";;
-        *MATE*)                  dcand="marco";;
-        *LXQt*|*LXDE*)           dcand="labwc openbox";;
-        *XFCE*)                  dcand="labwc xfwm4";;
-        # A desktop that names only its own compositor needs no arm of its
-        # own. The last field is the most specific one.
-        *) dcand=$(echo "${desktop##*:}" | tr '[:upper:]' '[:lower:]' |
-                   tr -cd 'a-z0-9._-');;
-    esac
-    # Whatever the desktop is, and whatever it failed to mention. The name from
-    # the screen goes first: that one is known to be the right answer, and all
-    # that is missing is its process.
-    cand="$WM_NAME $dcand xfwm4 compiz kwin_x11 kwin_wayland labwc openbox marco
-          metacity cosmic-comp mutter muffin gnome-shell cinnamon sway
-          hyprland Hyprland niri jay river wayfire dwl weston
-          i3 awesome fluxbox icewm"
-
-    if [ -z "$WM_PID" ]; then
-        for p in $cand; do
-            # A name already settled is not up for changing, only for finding
-            [ -z "$WM_NAME" ] || [ "$(wm_canon "$p")" = "$WM_NAME" ] || continue
-            pid=$(pgrep -x "$p" | head -1)
-            [ -n "$pid" ] || continue
-            WM_NAME=$(wm_canon "$p"); WM_PID=$pid; break
-        done
-    fi
-
-    # Nothing published and no process to be seen, which is the container case:
-    # the desktop's own compositor is the most that can be said, and saying it
-    # beats refusing to run at all
-    [ -z "$WM_NAME" ] && [ -n "$dcand" ] && WM_NAME=$(wm_canon "${dcand%% *}")
-
-    # Compositing can cost more than the window manager's own process: some
-    # paint their frames in a separate program, and one that does not composite
-    # at all is usually paired with something that does nothing else. Those
-    # helpers are what compositing costs, so they count too. The names are what
-    # /proc shows, cut to 15 characters.
     WM_PIDS=$WM_PID
-    case "$WM_NAME" in
-        compiz)   helpers='gtk-window-deco|emerald';;
-        openbox|metacity|marco|xfwm4|i3|awesome|fluxbox|icewm)
-                  helpers='picom|compton|xcompmgr';;
-        *)        helpers="";;
-    esac
-    if [ -n "$helpers" ] && [ -n "$WM_PID" ]; then
-        WM_PIDS="$WM_PID $(pgrep -x "$helpers" | tr '\n' ' ')"
+    p=""
+    [ "$st" = x11 ] && [ -n "$WM_PID" ] && p=$(./tools/wmpid 2>/dev/null)
+    if [ -n "$p" ] && [ "$p" != "$WM_PID" ] && [ -r "/proc/$p/stat" ]; then
+        { read -r name; read -r exe; } <<< "$(wm_canon "$p" "")"
+        WM_PIDS="$WM_PIDS $p"
+        WM_NAME="$WM_NAME+$name"
+        WM_EXES="$WM_EXES $exe"
     fi
+    WM_VERSION=$(wm_version)
 
     # The server counts too: a Wayland compositor is one process putting the
     # screen together, and on X11 that work is split with the server, so leaving
