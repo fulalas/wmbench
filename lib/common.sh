@@ -464,7 +464,7 @@ x11_wm_check () {
 # the socket. Where the lock is all there is, the compositor is the oldest of
 # them, having made it before starting anything.
 wayland_socket_owner () {
-    local sock ino p c pid pids parents name
+    local sock ino p c pid pids parents name hidden
     local -a targets
     [ -n "${WAYLAND_DISPLAY:-}" ] || return 1
     sock=$WAYLAND_DISPLAY
@@ -498,6 +498,10 @@ wayland_socket_owner () {
                 grep -qx "$c" <<< "$parents" || { pid=$c; break; }
             done
         fi
+        hidden=$(for c in $(pgrep -P "$pid"); do
+                     [ -r "/proc/$c/stat" ] && ! [ -r "/proc/$c/fd" ] && echo "$c"
+                 done)
+        [ -n "$hidden" ] && [ "${hidden//[0-9]/}" = "" ] && pid=$hidden
         [ -r "/proc/$pid/comm" ] || continue
         read -r name < "/proc/$pid/comm"
         printf '%s\n%s\n' "$pid" "$name"
