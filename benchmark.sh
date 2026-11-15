@@ -127,6 +127,7 @@ trap on_int INT TERM
 trap let_sleep EXIT
 keep_awake
 
+echo "wmbench:    $(cat VERSION 2>/dev/null || echo unknown)"
 echo "system:     $(hostname) ($(. /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-unknown}"))"
 echo "kernel:     $(uname -r)"
 echo "display:    $(display_info)"
